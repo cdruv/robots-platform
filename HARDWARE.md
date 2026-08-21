@@ -117,6 +117,8 @@ The #3543 encoder outputs are open-drain and are pulled up to 5 V by the board, 
 
 Factory #3543 solder-jumper configuration is unchanged.
 
+With the factory `Btn Jmp` intact, the pushbutton toggles power; the slide switch's On position latches power on and must be returned to Off before the pushbutton can turn it off.
+
 ## Motor-control signals
 
 - `PWM`: motor drive magnitude.
@@ -132,6 +134,8 @@ Initial software PWM limit should be conservative; planned starting cap is about
 ```
 
 The Arduino is the only component that drives these signals. The Pi sends bounded left/right wheel-velocity targets; neither the Pi nor Pixel sends PWM commands.
+
+Initial open-loop tests validated both motors in both directions and basic encoder counting at PWM 56–96. The test decoder counts both edges of channel A (about 720 counts per wheel revolution); wheel scale and odometry remain uncalibrated.
 
 ## Battery-voltage sensing
 
@@ -158,4 +162,3 @@ Therefore:
 A0  ≈ VSW × 0.3197
 VSW ≈ A0 × 3.1277
 ```
-

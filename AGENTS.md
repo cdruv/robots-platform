@@ -118,7 +118,7 @@ Hardware is assembled for Milestone 1:
 - Arduino UNO R4 and Raspberry Pi mounted on the front/top plate.
 - Power bank mounted at the rear.
 - ElectroCookie proto shield assembled and mounted on the Arduino.
-- Motor/encoder/control wiring is mostly complete.
+- Motor/encoder/control wiring, safe startup, low-power open-loop motion, and basic encoder direction/counting have been validated with 6× NiMH cells.
 - Battery-voltage divider is implemented on the proto shield.
 
 Pixel is mounted in the front on the top plate, facing display / front camera outwards, upside down at a slight angle so camera can cover both the surface the robot is on and a wide area in front of him.
@@ -150,4 +150,3 @@ Recommended implementation order:
 - Preserve raw, timestamped observations in telemetry; derived state alone is insufficient for debugging and calibration.
 - Treat phone visual-inertial pose as an additional measurement, not an unquestioned global pose source.
 - Keep future additions compatible with the same boundaries: range sensors, SLAM/localization, Nav2, and higher-level AI planning must feed the Pi integration and arbitration layer rather than the motor driver directly.
-
