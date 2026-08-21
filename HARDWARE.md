@@ -1,8 +1,24 @@
-# HARDWARE.md
+# [HARDWARE.md](http://HARDWARE.md)
 
-## Main hardware
+## System topology
 
-- Pololu Romi chassis.
+The long-term rover has three compute layers:
+
+```text
+Pixel 8  <--Wi-Fi or direct USB networking-->  Raspberry Pi 4  <--USB serial-->  Arduino UNO R4  -->  Pololu #3543  -->  motors
+```
+
+- The Pixel 8 is the camera/IMU/audio and co-processing/tracking/AI module.
+- The Raspberry Pi 4 is the onboard network and ROS 2 integration computer.
+- The Arduino UNO R4 is the real-time wheel-control and safety controller.
+- The Pololu #3543 board switches motor power and drives the motors.
+
+The laptop/Xbox controller communicates wirelessly with the Pi for Milestone 1. The Pixel is a later addition and is not required for Milestone 1. Direct Pixel-to-Pi USB networking is being explored, while Wi-Fi remains a supported alternative; the default transport is not yet finalized. The UNO R4's own Wi-Fi is not part of the normal command path.
+
+## Installed hardware
+
+- Google Pixel 8, perception inputs used: IMU, front camera, microphone; communication outputs used: speaker, display.
+- Pololu Romi chassis and two extension plates mounted on top.
 - Pololu Romi Encoder Pair Kit #3542.
 - Pololu Motor Driver and Power Distribution Board #3543.
 - Arduino UNO R4 WiFi.
@@ -12,7 +28,6 @@
 - 10,000 mAh USB power bank.
 - 6× matched NiMH AA cells in the Romi chassis.
 
-
 ## Physical layout
 
 - Pololu #3543 is mounted directly on the Romi chassis above the battery compartment.
@@ -21,7 +36,29 @@
 - 10,000 mAh power bank is mounted at the rear of the upper plate.
 - Motors and #3542 encoders remain in the standard Romi left/right chassis positions.
 - Signal wiring runs between the #3543 and the Arduino/proto shield using jumper wires.
-- Pi connects to Arduino over USB.
+- Pi connects to Arduino over USB for both serial data and Arduino power.
+- Pixel is mounted in front (in front of Pi and Arduino), facing frontal camera/display outwards. Display could be used to output debugging information and/or visualizations of robot state.
+
+
+
+## Raspberry Pi software platform
+
+- Ubuntu Server 26.04 LTS (Resolute Raccoon), ARM64.
+- ROS 2 Lyrical Luth.
+- Headless `ros-base` installation.
+
+The Pi runs onboard ROS 2 services without a desktop environment. GUI tools such as RViz run on the development laptop.\
+
+## Data connections
+
+```text
+Pixel 8        <--Wi-Fi or direct USB network, versioned protocol-->  Raspberry Pi 4
+laptop/teleop  <--Wi-Fi, operator network path--------------------->  Raspberry Pi 4
+Raspberry Pi 4 <--USB serial--------------------------------------->  Arduino UNO R4
+Arduino UNO R4 --> encoder/control wiring-------------------------->  Pololu #3543
+```
+
+The Pixel-to-Pi transport is deliberately switchable. Direct USB networking is being evaluated as a potentially more stable primary link, while Wi-Fi must remain available for fallback, development, or cable-free operation. Both should carry the same transport-independent application protocol. The Wi-Fi topology is also not yet fixed; it may use an existing network or a rover-hosted network. Motion safety must not depend on either Pixel link. The Pi-to-Arduino USB connection is the only normal high-level actuation path.
 
 ## Power
 
@@ -37,15 +74,23 @@ Computer domain:
 power bank → Raspberry Pi 4 → USB → Arduino UNO R4
 ```
 
+Pixel domain, initially:
+
+```text
+Pixel internal battery → Pixel 8
+```
+
 Ground is shared between #3543 and Arduino.
 
-Do not connect #3543 `VREG`, `VBAT`, or `VSW` directly to Arduino/Pi power rails.
+Do not connect #3543 `VREG`, `VBAT`, or `VSW` directly to Arduino/Pi power rails. A direct Pixel-to-Pi USB data connection may also cause the Pi to source charging current to the phone. Before adopting it, verify USB current behavior, the bank's simultaneous-output behavior, continuous current capacity, runtime, connector retention, and Pi undervoltage margin. Do not rely on the Pi to charge the Pixel until that power path has been tested.
 
 Nominal motor-battery voltage with 6× NiMH:
 
 ```text
 ~7.2 V
 ```
+
+
 
 ## #3543 ↔ Arduino wiring
 
@@ -70,6 +115,8 @@ GND   ↔ GND
 
 The #3543 encoder outputs are open-drain and are pulled up to 5 V by the board, so Arduino encoder pins use normal `INPUT`, not `INPUT_PULLUP`.
 
+Factory #3543 solder-jumper configuration is unchanged.
+
 ## Motor-control signals
 
 - `PWM`: motor drive magnitude.
@@ -83,6 +130,8 @@ Initial software PWM limit should be conservative; planned starting cap is about
 ```text
 140 / 255
 ```
+
+The Arduino is the only component that drives these signals. The Pi sends bounded left/right wheel-velocity targets; neither the Pi nor Pixel sends PWM commands.
 
 ## Battery-voltage sensing
 
@@ -110,19 +159,3 @@ A0  ≈ VSW × 0.3197
 VSW ≈ A0 × 3.1277
 ```
 
-Examples:
-
-```text
-7.2 V VSW → ~2.30 V at A0
-8.4 V VSW → ~2.69 V at A0
-```
-
-## Useful #3543 labels
-
-- `VBAT`: direct battery voltage.
-- `VSW`: switched battery voltage.
-- `VREG`: regulated 5 V rail by default.
-- `CTRL`: electronic power-switch control.
-- `SLP`: motor-driver sleep/enable.
-
-Factory #3543 solder-jumper configuration is unchanged.
