@@ -1,7 +1,7 @@
 # Robotics Platform
 
 This is an early-stage repository for individual robotics projects.
-There is no shared platform implementation yet.
+There is no shared platform implementation yet, will extract reusable components as we progress.
 
 ## Repository Guidance
 
