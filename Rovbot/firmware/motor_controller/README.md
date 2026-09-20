@@ -71,11 +71,15 @@ own, so one frame reports the counts, speeds and PWM of one 20 ms tick. Frames a
 emitted in every state, including `DISARMED` and `FAULT`. `TELEMETRY_DECIMATION` in
 the sketch publishes every Nth tick: `1` is 50 Hz and `5` is 10 Hz.
 
-A frame is skipped when the USB transmit buffer lacks room for it, which happens
-when the host stops reading. Telemetry is therefore lossy but never blocking; a
-blocking write would stall the control loop and latch a control-overrun fault, so
-dropping a status frame is the correct trade. Cumulative counts preserve net wheel
-travel across skipped frames; intermediate speed, PWM, and state samples can be lost.
+On the UNO R4 WiFi, `Serial` uses a synchronous UART to the USB bridge, without
+hardware flow control. The installed Renesas core 1.6.0 reports zero from
+`availableForWrite()` even when it can transmit, so telemetry must not use that
+value as a readiness check. A frame is at most 160 bytes; at 115200 baud its wire
+time is under 14 ms of the 20 ms tick. Hardware timing still needs bench verification.
+Native USB builds retain the whole-frame transmit-space check and skip a frame
+when the FIFO lacks room. Telemetry can be lost in transport; cumulative counts
+preserve net wheel travel across skipped frames, but intermediate speed, PWM,
+and state samples can be lost.
 
 States:
 
@@ -198,6 +202,13 @@ c++ -std=c++17 -Wall -Wextra -Werror \
   Rovbot/firmware/motor_controller/wheel_controller.cpp \
   -o /tmp/rovbot-controller-test
 /tmp/rovbot-controller-test
+c++ -std=c++17 -Wall -Wextra -Werror -DARDUINO_UNOR4_WIFI -DNO_USB \
+  -I Rovbot/firmware/motor_controller/tests \
+  Rovbot/firmware/motor_controller/tests/controller_test.cpp \
+  Rovbot/firmware/motor_controller/serial_protocol.cpp \
+  Rovbot/firmware/motor_controller/wheel_controller.cpp \
+  -o /tmp/rovbot-controller-wifi-test
+/tmp/rovbot-controller-wifi-test
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Rovbot/tools -p 'test_*.py'
 ```
 

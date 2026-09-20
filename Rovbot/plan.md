@@ -83,8 +83,9 @@ updated sketch before running the updated client; version 1 is incompatible.
 
 - Keep one telemetry frame per 20 ms control tick, using that tick's encoder sample.
   `TELEMETRY_DECIMATION` can lower the rate later if measurements justify it.
-- Keep the whole-frame transmit-space guard at every telemetry rate. Drop a status
-  frame when the host stops reading rather than letting serial output stall control.
+- Keep the whole-frame transmit-space guard for native USB builds. The UNO R4 WiFi
+  uses a synchronous UART bridge whose `availableForWrite()` always reports zero
+  in core 1.6.0; send bounded frames directly there and bench-check tick timing.
 - Commands carry no sequence numbers. Arm by sending zero targets and `A,2`, then
   keep streaming zeros until fresh telemetry reports `ARMED`, or a bounded timeout
   fails the attempt. See §4.3 for connection handling.
@@ -121,13 +122,17 @@ means the power bank is browning out the Pi under load — that shows up later a
 
 ## Phase 3 — Provision the Pi (me writes `Rovbot/pi/provision_pi.sh`)
 
+Script and runbook: [`pi/provision_pi.sh`](pi/provision_pi.sh), [`pi/README.md`](pi/README.md).
+Local checks pass; installation and hardware verification on the Pi are still pending.
+
 Idempotent, re-runnable, each step logged:
 
-- **ROS 2 Lyrical**: locale → `ros-apt-source_1.3.0.resolute` deb (resolves via
+- **ROS 2 Lyrical**: locale → `ros2-apt-source_1.3.0.resolute_all.deb` (resolves via
   `$(. /etc/os-release && echo $VERSION_CODENAME)`) → `apt install ros-lyrical-ros-base ros-dev-tools`
   plus the control/teleop/bridge packages listed above. `ros-base`, not `desktop` — RViz on the Pi is
   wasted disk.
-- **udev** → `Rovbot/ros2_ws/src/rovbot_bringup/udev/99-rovbot.rules`, keyed on the UNO R4 WiFi's
+- **udev** → generate `/etc/udev/rules.d/99-rovbot.rules` from the connected board;
+  record the verified rule in the Phase 4 bringup package. Keyed on the UNO R4 WiFi's
   VID/PID (verify with `lsusb`; sketch and bootloader enumerate differently):
   ```
   SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="....", \
@@ -136,7 +141,8 @@ Idempotent, re-runnable, each step logged:
   Keep ModemManager away from the motor port with `ID_MM_DEVICE_IGNORE`. Malformed
   probes no longer fault a disarmed controller, but another process must not interfere
   with an active link. Check for competing serial-device services during provisioning.
-- **Real-time limits**: `rtprio` and `memlock` in `/etc/security/limits.conf` for
+- **Real-time limits**: account-specific `rtprio` and `memlock` in `/etc/security/limits.d/90-rovbot.conf`,
+  plus `LimitRTPRIO` and `LimitMEMLOCK` in the systemd service, for
   `controller_manager`'s `thread_priority: 50` / `lock_memory: true`. A PREEMPT_RT kernel is *not*
   needed — 50 Hz is a 20 ms budget against tens of microseconds of syscall work. Set the `performance`
   CPU governor to cut jitter.

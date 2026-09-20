@@ -35,9 +35,15 @@ constexpr uint32_t HARDWARE_WATCHDOG_MS = 1000;
 constexpr uint8_t TELEMETRY_DECIMATION = 1;
 static_assert(TELEMETRY_DECIMATION >= 1, "TELEMETRY_DECIMATION must be >= 1");
 
-// Reserve room for a whole frame in the 256-byte USB CDC FIFO. Skip telemetry
-// when the host stops reading, so a full FIFO cannot stall the control loop.
-constexpr int TELEMETRY_MIN_TX_SPACE = 160;
+constexpr uint32_t SERIAL_BAUD_RATE = 115200;
+// Upper bound including CRLF, checked against extreme field values in tests.
+constexpr int TELEMETRY_MAX_FRAME_BYTES = 160;
+// UNO R4 WiFi uses a synchronous UART to its USB bridge, without flow control.
+// Its core inherits Print::availableForWrite() == 0; it has no USB TX FIFO
+// to query. Allow the bounded UART transmission within the 20 ms tick budget.
+static_assert(TELEMETRY_MAX_FRAME_BYTES * 10ULL * 1000000 / SERIAL_BAUD_RATE
+                  < CONTROL_PERIOD_US,
+              "Telemetry wire time must fit within one control period");
 
 constexpr int32_t TARGET_DEADBAND_MRAD_S = 100;
 
@@ -345,10 +351,13 @@ int32_t roundedSpeed(float speed)
 // left_count and left_measured_mrad_s describe the same instant.
 void publishTelemetry(uint32_t nowMs, int32_t leftCount, int32_t rightCount)
 {
+#if !defined(ARDUINO_UNOR4_WIFI) || !defined(NO_USB)
+  // Native USB boards can skip a frame when their transmit FIFO is full.
   // Cumulative counts preserve net travel even when a status frame is skipped.
-  if (Serial.availableForWrite() < TELEMETRY_MIN_TX_SPACE) {
+  if (Serial.availableForWrite() < TELEMETRY_MAX_FRAME_BYTES) {
     return;
   }
+#endif
 
   SerialProtocol::publishTelemetry(Serial, {
       nowMs, static_cast<uint8_t>(controllerState), faultBits,
@@ -448,7 +457,7 @@ void setup()
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_L_A), onLeftEncoderA, CHANGE);
   attachInterrupt(digitalPinToInterrupt(PIN_ENC_R_A), onRightEncoderA, CHANGE);
 
-  Serial.begin(115200);
+  Serial.begin(SERIAL_BAUD_RATE);
 
   readEncoderCounts(previousLeftCount, previousRightCount);
   lastControlUs = micros();

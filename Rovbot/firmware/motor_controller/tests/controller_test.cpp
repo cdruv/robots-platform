@@ -101,11 +101,17 @@ int main()
   SerialProtocol::publishTelemetry(output, {UINT32_MAX, UINT8_MAX, UINT16_MAX,
       INT32_MIN, INT32_MIN, INT32_MIN, INT32_MIN, INT32_MIN, INT32_MIN,
       INT16_MIN, INT16_MIN, UINT32_MAX});
-  assert(output.output.size() <= TELEMETRY_MIN_TX_SPACE);
+  assert(output.output.size() <= TELEMETRY_MAX_FRAME_BYTES);
   Serial.output.clear();
   Serial.txSpace = 0;
   tick();
+#if defined(ARDUINO_UNOR4_WIFI) && defined(NO_USB)
+  // The R4 WiFi UART reports zero even when it can transmit. This must not
+  // suppress startup/state telemetry and prevent the host from ever arming.
+  assert(Serial.output.find("T,2,") == 0);
+#else
   assert(Serial.output.empty());
+#endif
   Serial.txSpace = 256;
   tick();
   assert(Serial.output.find("T,2,") == 0);
