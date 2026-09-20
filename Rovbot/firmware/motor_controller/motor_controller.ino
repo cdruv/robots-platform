@@ -26,10 +26,25 @@ constexpr int32_t ENCODER_COUNTS_PER_WHEEL_REV = 720;
 
 constexpr uint32_t CONTROL_PERIOD_US = 20000;       // 50 Hz
 constexpr uint32_t MAX_CONTROL_INTERVAL_US = 100000;
-constexpr uint32_t TELEMETRY_PERIOD_MS = 100;       // 10 Hz
 constexpr uint32_t COMMAND_TIMEOUT_MS = 250;
 constexpr uint32_t PREARM_COMMAND_MAX_AGE_MS = 250;
 constexpr uint32_t HARDWARE_WATCHDOG_MS = 1000;
+
+// Telemetry is published from the end of controlTick() instead of from its own
+// timer, so one frame always describes one tick. Publishing every tick gives the
+// host enough frames to observe a sequence echo inside the arm handshake's quiet
+// window, and an independent link-failure signal faster than the 250 ms command
+// watchdog. 1 => 50 Hz, 2 => 25 Hz, 5 => 10 Hz.
+constexpr uint8_t TELEMETRY_DECIMATION = 1;
+static_assert(TELEMETRY_DECIMATION >= 1, "TELEMETRY_DECIMATION must be >= 1");
+
+// Free space required in the USB CDC transmit FIFO before a frame is started.
+// The FIFO is 256 bytes and the longest possible telemetry line is 134, so this
+// threshold both fits a worst-case frame and leaves headroom. It matters because
+// the core's write() spins until the host drains once the FIFO is full: a host
+// that stops reading would stall loop() and trip FAULT_CONTROL_OVERRUN or the
+// hardware watchdog. Dropping a status frame is correct; stalling control is not.
+constexpr int TELEMETRY_MIN_TX_SPACE = 160;
 
 constexpr int32_t TARGET_DEADBAND_MRAD_S = 100;
 
@@ -94,7 +109,7 @@ bool hardwareWatchdogActive = false;
 SerialProtocol::Receiver serialReceiver;
 
 uint32_t lastControlUs = 0;
-uint32_t lastTelemetryMs = 0;
+uint8_t telemetryTickCount = 0;
 int32_t previousLeftCount = 0;
 int32_t previousRightCount = 0;
 
@@ -257,6 +272,8 @@ void acceptWheelCommand(uint32_t sequence, int32_t leftMradS,
     rightMradS = 0;
   }
 
+  // Unlike A/D/F, this echo follows the range check: an out-of-range C latches
+  // FAULT_TARGET_RANGE above and is never echoed. See README.md.
   lastReceivedSequence = sequence;
   requestedLeftMradS = leftMradS;
   requestedRightMradS = rightMradS;
@@ -264,6 +281,10 @@ void acceptWheelCommand(uint32_t sequence, int32_t leftMradS,
   haveWheelCommand = true;
 }
 
+// The sequence echo must be assigned before the precondition checks below.
+// It reports receipt, not success, which is the only way the host can tell a
+// deliberate refusal from a lost command. See the sequence-echo contract in
+// README.md before moving this line under a guard clause.
 void tryArm(uint32_t sequence)
 {
   lastReceivedSequence = sequence;
@@ -289,6 +310,10 @@ void tryArm(uint32_t sequence)
   controllerState = ControllerState::ARMED;
 }
 
+// The sequence echo must be assigned before the precondition checks below.
+// It reports receipt, not success, which is the only way the host can tell a
+// deliberate refusal from a lost command. See the sequence-echo contract in
+// README.md before moving this line under a guard clause.
 void tryClearFaults(uint32_t sequence)
 {
   lastReceivedSequence = sequence;
@@ -330,6 +355,28 @@ void processCommand(const SerialProtocol::Command &command)
   }
 }
 
+int32_t roundedSpeed(float speed)
+{
+  return static_cast<int32_t>(speed >= 0.0f ? speed + 0.5f : speed - 0.5f);
+}
+
+// The counts come from the caller's sample rather than a fresh read so that
+// left_count and left_measured_mrad_s describe the same instant.
+void publishTelemetry(uint32_t nowMs, int32_t leftCount, int32_t rightCount)
+{
+  // Lossy but never blocking. Counts are cumulative and every other field is a
+  // current value, so a skipped frame delays information without losing any.
+  if (Serial.availableForWrite() < TELEMETRY_MIN_TX_SPACE) {
+    return;
+  }
+
+  SerialProtocol::publishTelemetry(Serial, {
+      nowMs, lastReceivedSequence, static_cast<uint8_t>(controllerState), faultBits,
+      leftCount, rightCount, requestedLeftMradS, requestedRightMradS,
+      roundedSpeed(measuredLeftMradS), roundedSpeed(measuredRightMradS),
+      appliedLeftPwm, appliedRightPwm, batteryMv});
+}
+
 void controlTick(uint32_t elapsedUs)
 {
   const uint32_t nowMs = millis();
@@ -369,43 +416,32 @@ void controlTick(uint32_t elapsedUs)
 
   if (controllerState != ControllerState::ARMED) {
     disableMotorDriver();
-    return;
+  } else {
+    const float dtSeconds = static_cast<float>(elapsedUs) / 1000000.0f;
+    appliedLeftPwm = leftController.update(requestedLeftMradS,
+                                           measuredLeftMradS, dtSeconds);
+    appliedRightPwm = rightController.update(requestedRightMradS,
+                                             measuredRightMradS, dtSeconds);
+
+    digitalWrite(PIN_SLEEP, HIGH);
+    writeMotor(PIN_PWM_L, PIN_DIR_L, appliedLeftPwm);
+    writeMotor(PIN_PWM_R, PIN_DIR_R, appliedRightPwm);
+
+    checkStall(requestedLeftMradS, measuredLeftMradS, appliedLeftPwm,
+               FAULT_LEFT_STALL, leftStallTiming, leftStallSinceMs, nowMs);
+    if (controllerState == ControllerState::ARMED) {
+      checkStall(requestedRightMradS, measuredRightMradS, appliedRightPwm,
+                 FAULT_RIGHT_STALL, rightStallTiming, rightStallSinceMs, nowMs);
+    }
   }
 
-  const float dtSeconds = static_cast<float>(elapsedUs) / 1000000.0f;
-  appliedLeftPwm = leftController.update(requestedLeftMradS,
-                                         measuredLeftMradS, dtSeconds);
-  appliedRightPwm = rightController.update(requestedRightMradS,
-                                           measuredRightMradS, dtSeconds);
-
-  digitalWrite(PIN_SLEEP, HIGH);
-  writeMotor(PIN_PWM_L, PIN_DIR_L, appliedLeftPwm);
-  writeMotor(PIN_PWM_R, PIN_DIR_R, appliedRightPwm);
-
-  checkStall(requestedLeftMradS, measuredLeftMradS, appliedLeftPwm,
-             FAULT_LEFT_STALL, leftStallTiming, leftStallSinceMs, nowMs);
-  if (controllerState == ControllerState::ARMED) {
-    checkStall(requestedRightMradS, measuredRightMradS, appliedRightPwm,
-               FAULT_RIGHT_STALL, rightStallTiming, rightStallSinceMs, nowMs);
+  // Every state publishes, including DISARMED and FAULT: the host needs the
+  // sequence echo to arm and the fault bits to diagnose a refusal. A fault
+  // latched above therefore appears in the same frame as the data that caused it.
+  if (++telemetryTickCount >= TELEMETRY_DECIMATION) {
+    telemetryTickCount = 0;
+    publishTelemetry(nowMs, leftCount, rightCount);
   }
-}
-
-int32_t roundedSpeed(float speed)
-{
-  return static_cast<int32_t>(speed >= 0.0f ? speed + 0.5f : speed - 0.5f);
-}
-
-void publishTelemetry(uint32_t nowMs)
-{
-  int32_t leftCount = 0;
-  int32_t rightCount = 0;
-  readEncoderCounts(leftCount, rightCount);
-
-  SerialProtocol::publishTelemetry(Serial, {
-      nowMs, lastReceivedSequence, static_cast<uint8_t>(controllerState), faultBits,
-      leftCount, rightCount, requestedLeftMradS, requestedRightMradS,
-      roundedSpeed(measuredLeftMradS), roundedSpeed(measuredRightMradS),
-      appliedLeftPwm, appliedRightPwm, batteryMv});
 }
 
 void setup()
@@ -438,7 +474,6 @@ void setup()
 
   readEncoderCounts(previousLeftCount, previousRightCount);
   lastControlUs = micros();
-  lastTelemetryMs = millis();
 
   hardwareWatchdogActive = WDT.begin(HARDWARE_WATCHDOG_MS) == 1;
   if (!hardwareWatchdogActive) {
@@ -459,13 +494,6 @@ void loop()
   if (elapsedUs >= CONTROL_PERIOD_US) {
     lastControlUs = nowUs;
     controlTick(elapsedUs);
-  }
-
-  const uint32_t nowMs = millis();
-  if (static_cast<uint32_t>(nowMs - lastTelemetryMs) >=
-      TELEMETRY_PERIOD_MS) {
-    lastTelemetryMs = nowMs;
-    publishTelemetry(nowMs);
   }
 
   if (hardwareWatchdogActive) {

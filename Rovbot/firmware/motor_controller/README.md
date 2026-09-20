@@ -60,11 +60,22 @@ On boot, the Arduino emits:
 B,1,<counts_per_rev>,<control_period_ms>,<command_timeout_ms>,<max_pwm>,<max_target_mrad_s>
 ```
 
-At 10 Hz it emits:
+At 50 Hz it emits:
 
 ```text
 T,1,<millis>,<last_sequence>,<state>,<faults>,<left_count>,<right_count>,<left_target_mrad_s>,<right_target_mrad_s>,<left_measured_mrad_s>,<right_measured_mrad_s>,<left_pwm>,<right_pwm>,<battery_mv>
 ```
+
+Telemetry is published from the end of the control tick, not from a timer of its
+own, so one frame reports the counts, speeds and PWM of one 20 ms tick. Frames are
+emitted in every state, including `DISARMED` and `FAULT`. `TELEMETRY_DECIMATION` in
+the sketch publishes every Nth tick: `1` is 50 Hz and `5` is 10 Hz.
+
+A frame is skipped when the USB transmit buffer lacks room for it, which happens
+when the host stops reading. Telemetry is therefore lossy but never blocking; a
+blocking write would stall the control loop and latch a control-overrun fault, so
+dropping a status frame is the correct trade. Counts are cumulative and every other
+field is a current value, so a skipped frame delays information without losing any.
 
 States:
 
@@ -86,6 +97,45 @@ Fault bits:
 | 5 / 32 | Right wheel appears stalled |
 | 6 / 64 | Control loop was delayed too long |
 | 7 / 128 | Hardware watchdog failed to start |
+
+### Sequence-echo contract
+
+`last_sequence` in telemetry reports **receipt, not success**. This is a contract
+the host depends on, not an implementation detail, and the sketch is written to
+preserve it:
+
+- `A`, `D` and `F` assign the echo as the first statement of their handler, before
+  every precondition check and before any early return. The echo therefore appears
+  even when the command is refused.
+- `C` is the exception: it assigns the echo only after the range check passes. An
+  out-of-range `C` latches `FAULT_TARGET_RANGE` and is never echoed.
+- A malformed or unparseable line latches `FAULT_PROTOCOL` and carries no sequence
+  to echo.
+
+Neither `A` nor `F` acknowledges itself. Success shows up only as a change in
+`state`, and a refusal changes nothing at all, so without the echo a host cannot
+distinguish *"the Arduino received my command and refused it"* from *"my command
+was lost."* With the echo it reads the `state` and `faults` of the same frame and
+reports the failed precondition; without it, it can only time out blindly and retry
+a command that will be refused again for the same reason.
+
+Observing the echo requires a quiet window, because each subsequent command
+overwrites `last_sequence`. The pre-arm freshness rule bounds that window at
+roughly 150 ms, which holds about seven frames at 50 Hz. A host arms like this:
+
+```text
+send  C,1,<n>,0,0
+send  A,1,<n+1>
+wait  ~150 ms without sending, reading telemetry:
+      last_sequence == n+1 and state == 1  -> armed
+      last_sequence == n+1 and state != 1  -> refused; read faults, fix the cause
+      last_sequence never reaches n+1      -> the command was lost; retry
+resume C at 50 Hz before the 250 ms command watchdog expires
+```
+
+Do not move the echo assignment in `tryArm()` or `tryClearFaults()` below their
+guard clauses while tidying. Nothing in the sketch fails if you do; the host simply
+loses its ability to tell a refusal from a lost command.
 
 ## Host startup sequence
 
@@ -117,9 +167,21 @@ F,1,31
 A,1,32
 ```
 
+Two preconditions make that ordering load-bearing. `F` is refused while either
+requested target is nonzero, so a host that keeps streaming motion commands into a
+fault clears nothing and stays faulted indefinitely — stop commanding motion first.
+And latching a fault discards the stored wheel command, so `A` needs a zero `C`
+that arrives after the fault and no more than 250 ms before it. Both refusals are
+silent except through the sequence echo described above.
+
 ## Values that require hardware calibration
 
-See [motor_controller_config.h](motor_controller_config.h) for calibration and
+See [motor_controller_config.h](motor_controller_config.h) for the values that
+depend on the installed hardware: the ADC reference used to scale battery
+readings, the feed-forward and PI gains, the PWM and wheel-speed limits, the
+low-battery and recovery thresholds, and the stall-detection thresholds and
+timeout. Each constant documents how to measure its replacement. They are
+compile-time settings shared by both wheels, so rebuild and upload after a change.
 
 Before floor operation, compare `battery_mv` with a multimeter and tune each
 wheel with the chassis raised. Test forward and reverse step commands separately.
