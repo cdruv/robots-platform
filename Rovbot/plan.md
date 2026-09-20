@@ -2,9 +2,10 @@
 
 ## Context
 
-The Arduino side is done and bench-verified: `firmware/motor_controller/` implements a closed-loop,
+The original Arduino controller was bench-verified: `firmware/motor_controller/` implements a closed-loop,
 fault-latching wheel-velocity controller, and `tools/motor_serial_test.py` has driven it successfully
-over USB serial. Everything above that line is empty — there is no Pi, no ROS 2 workspace, and no
+over USB serial. The protocol simplifications in Phase 1 still need a hardware recheck.
+Everything above that line is empty — there is no Pi, no ROS 2 workspace, and no
 macOS app anywhere in the repo.
 
 This milestone builds the first complete vertical slice through the architecture in `AGENTS.md`:
@@ -58,8 +59,8 @@ With it, Phases 3–5 collapse into me working directly and verifying against re
 it, I hand you scripts and we round-trip through paste-backs. I'll write the scripts either way, so
 nothing is wasted by deciding late.
 
-**Before anything:** `firmware/motor_controller/` and `tools/` are staged but uncommitted. Commit them
-first so the firmware edits in Phase 1 are a reviewable diff.
+**Before hardware bring-up:** upload the current firmware and use the matching host tool;
+Phase 1 describes the protocol version change.
 
 ---
 
@@ -75,79 +76,26 @@ first so the firmware edits in Phase 1 are a reviewable diff.
 
 ---
 
-## Phase 1 — Firmware prep (me writes, you flash)
+## Phase 1 — Firmware and bench client
 
-Three changes to `firmware/motor_controller/`, all small, all unblocking work downstream.
+The firmware and `tools/motor_serial_test.py` now use protocol version 2. Upload the
+updated sketch before running the updated client; version 1 is incompatible.
 
-**None of this is required for the robot to drive.** Counts are cumulative, so 10 Hz telemetry delays
-data but never loses it, and odometry would still be correct. This phase exists because (a) the Phase 4
-driver's arm handshake, staleness thresholds and `velocity_rolling_window_size` all derive their numbers
-from the telemetry rate, so changing it before writing that code is free and changing it after costs a
-full bench re-validation; and (b) right now `motor_serial_test.py` works and nothing else is in the
-system, which makes this the cheapest moment the firmware will ever be touched — once the Pi is in the
-loop, a firmware regression presents as a driver bug.
+- Keep one telemetry frame per 20 ms control tick, using that tick's encoder sample.
+  `TELEMETRY_DECIMATION` can lower the rate later if measurements justify it.
+- Keep the whole-frame transmit-space guard at every telemetry rate. Drop a status
+  frame when the host stops reading rather than letting serial output stall control.
+- Commands carry no sequence numbers. Arm by sending zero targets and `A,2`, then
+  keep streaming zeros until fresh telemetry reports `ARMED`, or a bounded timeout
+  fails the attempt. See §4.3 for connection handling.
+- Malformed input is ignored while disarmed or faulted and still stops an armed
+  controller. It never refreshes the command timer or clears a fault.
 
-**Reduced-scope fallback if you'd rather not touch working firmware:** take 1.3 only (documentation,
-zero risk) and build the driver against 10 Hz. The cost is blind arm timeouts instead of diagnosable
-refusals, and a host-side staleness threshold that duplicates rather than supplements the Arduino's
-250 ms watchdog. Both are livable for teleop; neither is livable once closed-loop heading control or
-Nav2 appears. `TELEMETRY_DECIMATION` keeps the door open — `1` is 50 Hz, `5` is 10 Hz.
+Keep the existing target limits, explicit arm/disarm and fault clearing, command
+watchdog, hardware watchdog, battery/stall checks, and 720 CPR encoder decoder.
 
-**1.1 Telemetry 10 Hz → 50 Hz.** `motor_controller.ino:29` sets `TELEMETRY_PERIOD_MS = 100`, against a
-50 Hz `controller_manager`. Two concrete payoffs, not "more data is better":
-
-*Arm failures become diagnosable.* `A` is silent on failure, and the echo can only be observed during a
-quiet window (each subsequent `C` overwrites `lastReceivedSequence`) bounded at ~150 ms by the pre-arm
-freshness rule. At 50 Hz that window holds ~7 frames; at 10 Hz, 1–2, so one late frame drops you into a
-blind timeout. The difference is *"refused: battery 5.31 V < 5.80 V recovery"* versus *"arm timed out."*
-
-*You gain an independent link-failure layer.* An Arduino that is alive but deaf, or a half-dead USB
-link, is caught only by host-side staleness detection — the Pi keeps sending `C`, so nothing necessarily
-trips on the Arduino side. At 10 Hz the threshold must sit at ≥250 ms to avoid false positives, which is
-the Arduino's own command watchdog; the detector fires no earlier than the protection it was meant to
-supplement. At 50 Hz you can warn at 100 ms and act at 500 ms.
-
-Secondary: feedback lag drops from ~140 ms (100 ms transport + ~37 ms of the Arduino's
-`SPEED_FILTER_ALPHA = 0.35f` EMA) to ~57 ms, and `/joint_states` stops stuttering in a `0,0,0,0,5Δ`
-pattern as 80% of `read()` cycles stop seeing stale data.
-
-Replace the standalone telemetry timer (`motor_controller.ino:464-469`) with a decimation counter at
-the *end of* `controlTick()`:
-
-```cpp
-constexpr uint8_t TELEMETRY_DECIMATION = 1;   // 1 => 50 Hz, 5 => 10 Hz
-```
-
-Publishing from inside the control tick also fixes a latent coherence bug: `publishTelemetry()`
-currently re-reads encoder counts at publish time (`motor_controller.ino:400-402`), so `left_count`
-and `left_measured_mrad_s` are sampled at different instants.
-
-Bandwidth check: ~75 B/frame typical, ~97 B worst case → 3.8–4.9 kB/s, plus ~1.4 kB/s of host commands,
-against 11.5 kB/s nominal. Tight on paper, and the UNO R4 WiFi's `Serial` is native USB CDC where 115200
-is a nominal setting anyway. It fits.
-
-**1.2 Guard telemetry writes.** *Only needed because 1.1 is happening — skip it if you skip 1.1.*
-At 50 Hz, a host that stops draining fills the USB CDC TX buffer and
-`Serial.print` blocks → `loop()` stalls → `FAULT_CONTROL_OVERRUN`, or worse the 1 s hardware watchdog.
-That is Pi-side software health reaching into Arduino-side safety. Wrap `publishTelemetry` in
-`Serial.availableForWrite() >= 128` and skip the frame otherwise. Telemetry becomes lossy-but-never-
-blocking, which is correct for a status stream.
-
-**1.3 Document the sequence-echo contract** in `firmware/motor_controller/README.md` — zero risk, and
-the best cost/benefit in the plan. `tryArm()` (`:269`) and `tryClearFaults()` (`:294`) both set
-`lastReceivedSequence = sequence` as the **first statement**, before every precondition check and before
-the early `return` at `:283`. That means the telemetry echo confirms *receipt*, not *success* — the only
-reason the driver can distinguish "the Arduino processed my `A` and refused" from "my `A` was lost."
-
-Today that behavior is an implementation accident. Anyone tidying `tryArm()` would naturally move that
-line below the guard clause, silently breaking the §4.3 handshake with no test failing. Writing it into
-the README is the whole fix. Also fix the sentence truncated at `README.md:122`.
-
-**Do not** change: out-of-range targets faulting instead of clamping (faulting is correct for the
-safety-authoritative device; the driver saturates on its side), or the 720 CPR decoder (0.305 mm/count
-is plenty, and doubling it doubles ISR load).
-
-**You:** upload, then re-run `tools/motor_serial_test.py --wheels-raised` to confirm nothing regressed.
+**You:** upload, then re-run the bench tool with `--wheels-raised` and complete the
+firmware README's stop-path checks. The protocol change has not been bench-verified yet.
 
 ---
 
@@ -185,10 +133,9 @@ Idempotent, re-runnable, each step logged:
   SUBSYSTEM=="tty", ATTRS{idVendor}=="2341", ATTRS{idProduct}=="....", \
     SYMLINK+="rovbot_arduino", MODE="0660", GROUP="dialout", ENV{ID_MM_DEVICE_IGNORE}="1"
   ```
-  `ID_MM_DEVICE_IGNORE` is not optional. **ModemManager will open the port and send AT commands to it**,
-  and since any malformed line latches `FAULT_PROTOCOL` *even while disarmed*
-  (`motor_controller.ino:327-329`), that means an intermittent unexplained fault on every boot. Purge
-  `brltty` too — it steals USB-serial devices on Ubuntu.
+  Keep ModemManager away from the motor port with `ID_MM_DEVICE_IGNORE`. Malformed
+  probes no longer fault a disarmed controller, but another process must not interfere
+  with an active link. Check for competing serial-device services during provisioning.
 - **Real-time limits**: `rtprio` and `memlock` in `/etc/security/limits.conf` for
   `controller_manager`'s `thread_priority: 50` / `lock_memory: true`. A PREEMPT_RT kernel is *not*
   needed — 50 Hz is a 20 ms budget against tens of microseconds of syscall work. Set the `performance`
@@ -217,7 +164,7 @@ rovbot_bringup/       launch/{rovbot,control,teleop,bridge}.launch.py
 ```
 
 **No `rovbot_msgs` yet** — the three services are all `std_srvs/srv/Trigger`, and status is already
-covered twice over (§4.2). **No `rovbot_teleop` yet** — stock `joy` + `teleop_twist_joy` + `twist_mux`
+covered by one stock broadcaster (§4.2). **No `rovbot_teleop` yet** — stock `joy` + `teleop_twist_joy` + `twist_mux`
 are the entire chain. Both get created the first time they'd hold real content.
 
 `rovbot_description` is separate because it's the one artifact RViz, the future workstation, and any
@@ -228,43 +175,32 @@ simulator all need, and it must install without compiling a plugin that links `t
 A `hardware_interface::SystemInterface` plugin. **Joints:** `position` (rad, integrated from cumulative
 counts), `velocity` (rad/s), and a `velocity` command. **GPIO state interfaces** for Arduino status:
 `state`, `faults`, `battery_voltage`, `left_pwm`, `right_pwm`, `left_target`, `right_target`,
-`telemetry_age`, `link_state`, `last_sequence`.
+`telemetry_age`, `link_state`.
 
-**Threading: one reader thread; writes stay in `write()`.** The reader `ppoll()`s the fd, splits on
-`\n` (stripping the `\r` from Arduino `println`), parses, and publishes into a triple-buffered POD
-snapshot behind one atomic index — so `read()` is a lock-free load, no syscalls. It earns its keep for
-three reasons: it guarantees the Arduino's TX buffer is drained continuously (per 1.2, a non-draining
-host can trip an Arduino-side safety fault — decoupling removes that coupling entirely); it decouples
-telemetry arrival phase from the 50 Hz `read()` phase; and a USB hiccup can never stall the control
-loop. Writes stay in `write()` because the keepalive must be phase-locked to the control cycle. Exactly
-one thread reads the fd, exactly one writes it.
+**Serial I/O: start in the driver cycle.** Open the port nonblocking. `read()` consumes
+available bytes with a fixed per-cycle budget, assembles newline-delimited records,
+and retains an incomplete record for the next cycle. Bound the receive buffer and
+resynchronize at the next newline after an oversized record. Use complete version 2
+telemetry only; reject other versions and field counts.
 
-**`write()` — one complete line, every cycle, no exceptions** (except `WAIT_BOOT`, `LINK_LOST`, and the
-deliberate arm window). At 50 Hz the Arduino sees a `C` every 20 ms — 12.5× margin on its 250 ms
-watchdog, with no separate timer to forget.
+`write()` sends current wheel targets at 50 Hz once telemetry establishes the link.
+Send zeros whenever inactive, waiting to arm, or handling a fault. Check finite
+values, convert rad/s to integer mrad/s, and proportionally limit both wheels to the
+configured maximum so saturation preserves turn radius.
 
-```
-1. !active_                        -> left = right = 0    // write() may be called while INACTIVE
-2. link_state != ARMED             -> left = right = 0    // MANDATORY, see below
-3. !std::isfinite(cmd)             -> 0, throttled WARN
-4. rad/s -> mrad/s, llround
-5. PROPORTIONAL saturation: m = max(|l|,|r|); if m > max: scale BOTH by max/m
-6. format into char[48], ONE ::write(), loop on partial writes
-```
+Keep a small fixed transmit buffer and its unsent offset. A partial write is normal
+stream behavior: retain the remainder and retry on a later cycle when the port is
+writable. Never interleave another line into a partial line or spin on `EAGAIN`.
+Do not queue historical wheel targets; format the latest target when the buffer is
+free. Treat a write that cannot complete within a bounded deadline as a link failure.
 
-Four traps encoded there:
+Service arm, disarm, and clear requests through the same writer. During lifecycle
+transitions, a bounded wait may pump the same I/O functions while the normal cycle
+is stopped; there must still be only one owner of the serial port.
 
-- **NaN.** Command interfaces initialise to NaN by default; `llround(NaN * 1000.0)` is unspecified and
-  produces garbage the Arduino answers with `FAULT_TARGET_RANGE`. Check `isfinite` *and* set
-  `initial_value="0.0"` in the URDF.
-- **Proportional, not per-wheel, saturation.** Clamping only the faster wheel silently changes the
-  commanded curvature — poison for path following. Scaling both preserves the turn radius.
-- **Rule 2 is correctness, not just safety.** `tryClearFaults()` refuses while either requested target
-  is nonzero. If `diff_drive_controller` is still commanding motion when you send `F`, the clear
-  silently does nothing and the robot is stuck in FAULT forever. This is the subtlest trap in the
-  contract.
-- **Line atomicity.** A partial write is a malformed line is a latched fault. One `::write()` per line,
-  fixed stack buffer, no `ostringstream` in the RT path.
+This keeps serial work bounded without a reader thread or shared snapshot buffers.
+Measure cycle duration under load before adding concurrency. Telemetry drops at the
+Arduino are acceptable; command timeouts and telemetry freshness checks still apply.
 
 **Position integration.** Wraparound is not the hazard (2³¹ counts ÷ 687.5 counts/s ≈ 36 days of
 full-speed driving). The hazard is the Arduino rebooting and counts jumping to 0. One mechanism covers
@@ -272,48 +208,46 @@ both: unsigned-arithmetic deltas for defined wraparound, a plausibility bound (3
 rejects jumps, and **re-baseline on reboot, never zero** — `position_rad_` survives arm/disarm cycles
 and reboots; only `on_configure` resets it. Zeroing on activate would teleport `/odom`.
 
-**The `B` boot line is a configuration handshake.** Cross-check `counts_per_rev` etc. against
-`expected_*` params and **fail hard on mismatch** — flashing firmware with a different CPR under an
-unchanged URDF silently scales all odometry by 2× with no other symptom. A `B` seen at any *later* time
-means the Arduino rebooted: bump a generation counter, re-baseline, require re-arm.
+**Connection and reset handling.** Valid telemetry establishes the connection.
+Configure encoder CPR and operating limits to match the installed firmware's
+`motor_controller.ino` and `motor_controller_config.h`; they are not sent over serial.
 
-### 4.2 Status — two stock mechanisms, zero custom controllers
+An unexpected transition out of `ARMED` or an implausible encoder jump must stop
+motion and require explicit re-arm. Re-baseline counts on a detected reset; use
+the telemetry timestamp as supporting evidence, allowing for its wrap.
 
-1. `gpio_controllers/GpioCommandController` in broadcaster mode (no command interfaces configured)
-   publishes `control_msgs/DynamicJointState` on `~/gpio_states`.
-2. The framework's built-in `~/hardware_status` — override `init_hardware_status_message()` and
-   `update_hardware_status_message()` and it auto-publishes stamped `control_msgs/HardwareStatus`.
-   `GenericHardwareState` maps almost exactly: state 0/1/2 → `POWER_STANDBY`/`POWER_ON`/`POWER_ERROR`;
-   fault bits → `health_status` + `error_domain[]`; telemetry age → `connectivity_status`; the `B` line
-   → `firmware_version`; everything numeric → `state_details[]` KeyValues.
+### 4.2 Status — one stock broadcaster
 
-**Do not write a `rovbot_status_broadcaster`.** It would duplicate both. The one honest gap — state
-interfaces carry no timestamp — is exactly why `~/hardware_status` stays alongside the GPIO interfaces.
+Use the GPIO state interfaces with `gpio_controllers/GpioCommandController` in
+broadcaster mode to publish one numeric status stream on `~/gpio_states`. The Mac
+app decodes state and fault values and displays battery voltage, wheel targets,
+PWM, link state, and telemetry age. It also tracks local receipt time so an old
+status message is not displayed as current when the connection stops.
+
+Do not add a second custom hardware-status mapping or a custom status controller
+for this milestone. Add another representation only when a concrete consumer needs it.
 
 ### 4.3 Lifecycle, arming, and the return-code policy
 
-INACTIVE ≡ Arduino DISARMED, ACTIVE ≡ ARMED. The mapping is nearly 1:1, which is a good sign the
-contract is sane.
+Activation requires Arduino `ARMED`; deactivation requests `DISARMED`. A latched
+fault keeps the Arduino in `FAULT` until explicitly cleared.
 
-**The arm handshake.** `A` is silent on failure, but 1.3's echo semantics turn a blind timeout into a
-deterministic answer:
+**Arming observes state.** After allowing for startup, discard buffered input,
+terminate any partial command with a newline, and send `D,2`. Require fresh
+version 2 telemetry showing `DISARMED` before arming. An existing fault requires
+fault recovery first. Do not treat a previously cached `ARMED` sample as success.
 
-```
-t=0      send C,seq,0,0                          ; note arm_zero_seq
-t=20ms   send A,seq+1                             ; note arm_seq
-t=20-170ms  SEND NOTHING, poll telemetry.
-         Safe: pre-arm freshness is 250 ms from t=0, and so is the command watchdog if it armed.
-         last_seq == arm_seq && state == 1  -> ARMED
-         last_seq == arm_seq && state != 1  -> DETERMINISTIC REJECTION; read faults, report the
-                                               failed precondition, do NOT retry blindly
-t=170ms  resume C,seq,0,0 at 50 Hz; fall through to timeout only if the echo was missed
-```
+Send `C,2,0,0`, then `A,2`. Continue sending zero targets at 50 Hz while reading
+telemetry. Fresh `ARMED` telemetry permits motion; a fault or a one-second timeout
+ends the attempt with `D,2` and a failure report containing the last state/faults.
+There is no pause in command refresh and no automatic retry of arm requests.
 
-At 50 Hz that quiet window holds 7 telemetry frames; at 10 Hz it holds 1–2. That's the third
-independent argument for 1.1. Same structure for fault clearing — and note `latchFault()` sets
-`haveWheelCommand = false`, so a fresh `C` after `F` is **mandatory** before `A`.
+A refusal can leave state and faults unchanged. Report an arm timeout honestly;
+do not claim it identifies a lost command or a particular failed precondition.
+For clearing, send zero targets and `F,2`, then keep streaming zeros while waiting
+for `DISARMED`. After clearing succeeds, send a fresh zero command before arming.
 
-**Return codes — the single easiest thing to get wrong.**
+**Return codes.**
 
 | Condition | Action |
 |---|---|
@@ -337,14 +271,14 @@ ros2 control set_hardware_component_state rovbot_arduino inactive
 ros2 control set_hardware_component_state rovbot_arduino active
 ```
 
-already performs a disarm → re-arm cycle. With `auto_clear_fault_mask: 3`
-(`FAULT_COMMAND_TIMEOUT | FAULT_PROTOCOL` — the two "host went away or garbled a line" faults a healthy
-host legitimately resolves) it clears those on the way through. That's ~80% of fault recovery for zero
-new code. Everything else stays latched for a human, because it means a physical condition.
+performs a disarm → re-arm cycle when no fault is latched. Keep fault clearing explicit;
+a failed activation must report the existing fault rather than automatically clear it.
+Until the service below exists, use the bench tool with `--clear-faults` after stopping
+the ROS driver and correcting the cause. Only one process may own the port.
 
 Add `~/arm`, `~/disarm`, `~/clear_faults` as `std_srvs/srv/Trigger` in a **second pass**, hosted on the
 component's own node via `get_node()` — no custom broadcaster, no GPIO command plumbing. Callbacks set
-an atomic request and wait on a condition variable; they never touch the fd.
+a bounded pending request for the serial owner; they never write directly to the fd.
 
 Startup hygiene: `tcflush(fd, TCIOFLUSH)` plus one deliberate bare `"\n"` in `on_configure`. A bare
 newline with an empty RX buffer is ignored by the parser, so it's harmless when there's no garbage and
@@ -359,10 +293,11 @@ Layered so almost nothing needs the robot powered:
 **Tier 0 — plain gtest, no ROS, no hardware.** Encoder/decoder round-trips, boundary values, malformed
 input, the position integrator, and the link state machine against a fake clock.
 
-The highest-value test in the plan: **compile the real `firmware/motor_controller/serial_protocol.cpp`
-host-side behind a small Arduino shim and property-test that every line the driver can emit parses to
-`CommandType != INVALID`.** That directly and exhaustively covers the "any malformed line latches
-`FAULT_PROTOCOL`" rule, which is otherwise a latent, intermittent, field-only failure.
+The existing firmware host tests compile the real parser and sketch behind a small
+Arduino shim. They cover version mismatches, numeric limits, fragmented and oversized
+lines, malformed input in each state, and telemetry field order. Reuse these tests and
+add compatibility checks for commands emitted by the Pi driver. Run instructions are
+in the firmware README.
 
 **Tier 1 — `fake_arduino.py` over a pty.** ~250 lines porting the `.ino` state machine, behind
 `pty.openpty()` so your `termios`/`O_NONBLOCK`/`tcflush` paths are exercised identically to the real
@@ -375,10 +310,9 @@ arg — it lets the URDF, controller configs, teleop chain and the Mac app be de
 with no Pi and no Arduino at all.
 
 **Tier 2 — real Arduino, wheels raised, motor power reachable.** The existing README checklist still
-applies, plus: measure whether opening the port actually resets the UNO R4 WiFi (native USB CDC usually
-doesn't, unlike a classic UNO — the design is correct either way, this just sets `boot_timeout_s`);
-`last_seq` echo latency histogram; arm success rate over 100 attempts; deliberate malformed-line
-injection; unplug USB mid-run and confirm you land in UNCONFIGURED and **not** FINALIZED; and an
+applies, plus: verify connection both after a reset and to an already-running Arduino;
+repeat disarm/arm cycles while streaming zeros; deliberately inject malformed
+lines in disarmed and armed states; unplug USB mid-run and confirm you land in UNCONFIGURED and **not** FINALIZED; and an
 explicit sign-convention test — command +1 rad/s per wheel and confirm both `position` interfaces
 *increase* and `/odom` `twist.linear.x > 0`. The firmware README already warns a sign error makes the PI
 controller drive *harder* the wrong way; ROS adds two more places to invert it.
@@ -414,8 +348,8 @@ produces an out-of-range wheel target, which is a latched stop. Fix in two layer
 so the corner fits (`a + ω·b/2 ≤ 0.21` → `(0.15, 0.80)` works), *and* keep the proportional saturation
 of §4.1 as the hard guarantee with a `saturation_events` counter. Don't change the firmware — faulting
 is correct for the safety-authoritative device. Add a launch-time assertion comparing `geometry.yaml`,
-the controller YAML, and the `B` line, because the driver auto-follows a firmware change and the YAML
-does not.
+the controller YAML, and the configured wheel limit. Keep that limit consistent with
+the installed firmware when changing either configuration.
 
 **The timeout ladder**, and why the Arduino watchdog is *not* first in normal operation: the driver
 sends `C` at 50 Hz unconditionally, so a WiFi dropout never reaches it. A dropout instead walks deadman
@@ -458,7 +392,7 @@ bandwidth make the CDR work worth doing. Nothing above the protocol changes. Eve
 `JoyPublisher`, `TelemetryStore`, the views — is written against the protocol, never against JSON.
 
 **v1 screens:** connection + robot state (DISARMED/ARMED/FAULT with decoded fault bit names, battery
-volts, link RTT, telemetry age); a drive view (live wheel target vs measured, a 2D odometry trail,
+volts, telemetry age); a drive view (live wheel target vs measured, a 2D odometry trail,
 controller stick visualization, deadman indicator); a log view streaming `/rosout` with severity
 filtering; and arm/disarm/clear-fault buttons wired to the Phase 4.4 services.
 
@@ -502,7 +436,7 @@ why the transport choice doesn't constrain it. Control Center's layout should re
 | Phase 1 | `motor_serial_test.py` still drives both wheels; telemetry lines arrive at ~50 Hz |
 | Phase 2 | `ssh rovbot@rovbot.local` over WiFi; `vcgencmd get_throttled` = `0x0` |
 | Phase 3 | `ros2 doctor` clean; `ls -l /dev/rovbot_arduino` resolves; no ModemManager in `udevadm monitor` at plug-in |
-| Phase 4 | `colcon test` green — including the round-trip fuzz against the real Arduino parser |
+| Phase 4 | `colcon test` green — including compatibility checks against the real Arduino parser |
 | Phase 4 (mock) | `use_mock_hardware:=true` on the laptop: `/odom`, TF, `/joint_states` all correct with no hardware |
 | Phase 5 | Wheels raised: `ros2 topic pub` a `TwistStamped` → wheels turn the right way, `/odom` agrees; unplug USB → UNCONFIGURED, not FINALIZED |
 | Phase 6 | Deadman held → rover drives. Released, WiFi killed, `ros2_control_node` killed → stops each time, <100 mm |

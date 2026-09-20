@@ -16,7 +16,6 @@ enum class CommandType : uint8_t {
 
 struct Command {
   CommandType type = CommandType::INVALID;
-  uint32_t sequence = 0;
   int32_t leftMradS = 0;
   int32_t rightMradS = 0;
 };
@@ -35,17 +34,8 @@ class Receiver {
   bool rxOverflow = false;
 };
 
-struct BootInfo {
-  int32_t countsPerRev;
-  uint32_t controlPeriodMs;
-  uint32_t commandTimeoutMs;
-  int16_t maxPwm;
-  int32_t maxTargetMradS;
-};
-
 struct Telemetry {
   uint32_t millis;
-  uint32_t lastSequence;
   uint8_t state;
   uint16_t faults;
   int32_t leftCount;
@@ -59,7 +49,6 @@ struct Telemetry {
   uint32_t batteryMv;
 };
 
-void publishBoot(Print &output, const BootInfo &info);
 void publishTelemetry(Print &output, const Telemetry &telemetry);
 
 }  // namespace SerialProtocol

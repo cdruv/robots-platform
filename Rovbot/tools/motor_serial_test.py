@@ -19,6 +19,7 @@ except ImportError:
 
 
 BAUD_RATE = 115200
+PROTOCOL_VERSION = "2"
 SEND_PERIOD_SECONDS = 0.05
 MAX_TARGET_MRAD_S = 6000
 MAX_TEST_DURATION_SECONDS = 10.0
@@ -26,18 +27,19 @@ MAX_TEST_DURATION_SECONDS = 10.0
 
 class MotorLink:
     def __init__(self, port: str) -> None:
-        self.serial = serial.Serial(port, BAUD_RATE, timeout=0.01)
-        self.sequence = 0
+        self.serial = serial.Serial(
+            port, BAUD_RATE, timeout=0.01, write_timeout=0.1
+        )
         self.rx_buffer = bytearray()
 
     def close(self) -> None:
         self.serial.close()
 
     def send(self, command: str, *fields: int) -> None:
-        self.sequence = (self.sequence + 1) & 0xFFFFFFFF
-        parts = [command, "1", str(self.sequence), *(str(field) for field in fields)]
-        self.serial.write((",".join(parts) + "\n").encode("ascii"))
-        self.serial.flush()
+        parts = [command, PROTOCOL_VERSION, *(str(field) for field in fields)]
+        message = (",".join(parts) + "\n").encode("ascii")
+        if self.serial.write(message) != len(message):
+            raise serial.SerialTimeoutException("incomplete serial command")
 
     def command_wheels(self, left_mrad_s: int, right_mrad_s: int) -> None:
         self.send("C", left_mrad_s, right_mrad_s)
@@ -56,10 +58,10 @@ class MotorLink:
 
 def parse_state(line: str) -> tuple[int, int] | None:
     fields = line.split(",")
-    if len(fields) != 15 or fields[0:2] != ["T", "1"]:
+    if len(fields) != 14 or fields[0:2] != ["T", PROTOCOL_VERSION]:
         return None
     try:
-        return int(fields[4]), int(fields[5])
+        return int(fields[3]), int(fields[4])
     except ValueError:
         return None
 
@@ -74,7 +76,9 @@ def print_and_check_telemetry(link: MotorLink) -> tuple[int, int] | None:
     return latest_state
 
 
-def wait_until_armed(link: MotorLink, timeout_seconds: float = 1.0) -> None:
+def wait_for_state(
+    link: MotorLink, expected_state: int, timeout_seconds: float = 1.0
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     next_send = 0.0
     last_state = None
@@ -86,21 +90,22 @@ def wait_until_armed(link: MotorLink, timeout_seconds: float = 1.0) -> None:
         state = print_and_check_telemetry(link)
         if state is not None:
             last_state = state
-            if state[0] == 1:
+            if state[0] == expected_state:
                 return
-            if state[0] == 2:
+            if state[0] == 2 and expected_state == 1:
                 raise RuntimeError(f"Arduino entered FAULT; fault bits={state[1]}")
         time.sleep(0.005)
-    raise RuntimeError(f"Arduino did not arm; last state/faults={last_state}")
+    raise RuntimeError(
+        f"Arduino did not reach state {expected_state}; last state/faults={last_state}"
+    )
 
 
 def safe_stop(link: MotorLink) -> None:
-    # Several zero commands make a normal stop robust to a transient host-side
-    # write failure. The Arduino watchdog remains the final fallback.
-    for _ in range(3):
+    # Try disarming even if the zero command fails. The watchdog is the fallback.
+    try:
         link.command_wheels(0, 0)
-        time.sleep(SEND_PERIOD_SECONDS)
-    link.send("D")
+    finally:
+        link.send("D")
 
 
 def validate_args(args: argparse.Namespace) -> None:
@@ -129,14 +134,20 @@ def run(args: argparse.Namespace) -> None:
         time.sleep(1.5)
         print_and_check_telemetry(link)
 
+        # Discard old status and terminate any partial command left by a prior
+        # connection. Confirm DISARMED before accepting a later ARMED sample.
+        link.rx_buffer.clear()
+        link.serial.reset_input_buffer()
+        link.serial.write(b"\n")
+        link.send("D")
         link.command_wheels(0, 0)
         if args.clear_faults:
             link.send("F")
-            time.sleep(0.1)
-            link.command_wheels(0, 0)
+        wait_for_state(link, 0)
 
+        link.command_wheels(0, 0)
         link.send("A")
-        wait_until_armed(link)
+        wait_for_state(link, 1)
 
         print(
             f"armed; commanding left={args.left}, right={args.right} mrad/s "
@@ -157,7 +168,7 @@ def run(args: argparse.Namespace) -> None:
     finally:
         try:
             safe_stop(link)
-            print("zero command sent; controller disarmed")
+            print("zero command and disarm requested")
         except (OSError, serial.SerialException) as error:
             print(
                 f"could not send the final stop ({error}); "

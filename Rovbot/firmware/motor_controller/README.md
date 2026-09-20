@@ -19,6 +19,9 @@ timeout, malformed message, out-of-range target, low battery, encoder stall, or
 control-loop overrun latches a fault, writes both PWM outputs to zero, and pulls
 `SLP` low. A fault never clears itself.
 
+Malformed or unsupported messages are ignored while disarmed or faulted. They
+never update targets, refresh the command timer, or clear an existing fault.
+
 The hardware watchdog resets the microcontroller if the main loop stops running
 for approximately one second. The startup sequence then drives `SLP` low again.
 This is a backstop for a wedged sketch; the 250 ms command watchdog is the normal
@@ -31,6 +34,9 @@ This is not a substitute for an accessible physical motor-power cutoff.
 The link is ASCII at 115200 baud. Each message is one newline-terminated line.
 Carriage returns are ignored. Fields may not contain spaces.
 
+The current protocol is version **2**. Version 1 commands and telemetry are not
+compatible: update the firmware and host tool together.
+
 Wheel speeds use integer milliradians per second. Using physical units keeps the
 Pi interface stable if the encoder decoder is later changed from 720 counts per
 wheel revolution to full quadrature at approximately 1440 counts per revolution.
@@ -38,10 +44,10 @@ wheel revolution to full quadrature at approximately 1440 counts per revolution.
 Commands from the Pi:
 
 ```text
-C,1,<sequence>,<left_mrad_s>,<right_mrad_s>
-A,1,<sequence>
-D,1,<sequence>
-F,1,<sequence>
+C,2,<left_mrad_s>,<right_mrad_s>
+A,2
+D,2
+F,2
 ```
 
 - `C` updates the bounded wheel-speed request and refreshes the command timer.
@@ -50,20 +56,14 @@ F,1,<sequence>
 - `F` clears faults only while both requested speeds are zero, the battery has
   recovered, and the hardware watchdog is active.
 
-Sequence values are echoed for correlation. They are deliberately not required
-to be monotonic, so a Pi process can restart its sequence at zero without
-requiring an Arduino reset.
+Commands have no sequence numbers or individual acknowledgements. The host
+observes state changes in telemetry and uses a bounded timeout for arming and
+fault clearing. It continues sending zero targets while waiting.
 
-On boot, the Arduino emits:
-
-```text
-B,1,<counts_per_rev>,<control_period_ms>,<command_timeout_ms>,<max_pwm>,<max_target_mrad_s>
-```
-
-At 50 Hz it emits:
+The Arduino emits telemetry at 50 Hz, beginning with the first control tick:
 
 ```text
-T,1,<millis>,<last_sequence>,<state>,<faults>,<left_count>,<right_count>,<left_target_mrad_s>,<right_target_mrad_s>,<left_measured_mrad_s>,<right_measured_mrad_s>,<left_pwm>,<right_pwm>,<battery_mv>
+T,2,<millis>,<state>,<faults>,<left_count>,<right_count>,<left_target_mrad_s>,<right_target_mrad_s>,<left_measured_mrad_s>,<right_measured_mrad_s>,<left_pwm>,<right_pwm>,<battery_mv>
 ```
 
 Telemetry is published from the end of the control tick, not from a timer of its
@@ -74,8 +74,8 @@ the sketch publishes every Nth tick: `1` is 50 Hz and `5` is 10 Hz.
 A frame is skipped when the USB transmit buffer lacks room for it, which happens
 when the host stops reading. Telemetry is therefore lossy but never blocking; a
 blocking write would stall the control loop and latch a control-overrun fault, so
-dropping a status frame is the correct trade. Counts are cumulative and every other
-field is a current value, so a skipped frame delays information without losing any.
+dropping a status frame is the correct trade. Cumulative counts preserve net wheel
+travel across skipped frames; intermediate speed, PWM, and state samples can be lost.
 
 States:
 
@@ -90,7 +90,7 @@ Fault bits:
 | Bit/value | Meaning |
 | ---: | --- |
 | 0 / 1 | Wheel-command timeout |
-| 1 / 2 | Malformed or unsupported protocol message |
+| 1 / 2 | Malformed or unsupported protocol message while armed |
 | 2 / 4 | Wheel target outside the configured limit |
 | 3 / 8 | Low motor-battery voltage |
 | 4 / 16 | Left wheel appears stalled |
@@ -98,81 +98,46 @@ Fault bits:
 | 6 / 64 | Control loop was delayed too long |
 | 7 / 128 | Hardware watchdog failed to start |
 
-### Sequence-echo contract
-
-`last_sequence` in telemetry reports **receipt, not success**. This is a contract
-the host depends on, not an implementation detail, and the sketch is written to
-preserve it:
-
-- `A`, `D` and `F` assign the echo as the first statement of their handler, before
-  every precondition check and before any early return. The echo therefore appears
-  even when the command is refused.
-- `C` is the exception: it assigns the echo only after the range check passes. An
-  out-of-range `C` latches `FAULT_TARGET_RANGE` and is never echoed.
-- A malformed or unparseable line latches `FAULT_PROTOCOL` and carries no sequence
-  to echo.
-
-Neither `A` nor `F` acknowledges itself. Success shows up only as a change in
-`state`, and a refusal changes nothing at all, so without the echo a host cannot
-distinguish *"the Arduino received my command and refused it"* from *"my command
-was lost."* With the echo it reads the `state` and `faults` of the same frame and
-reports the failed precondition; without it, it can only time out blindly and retry
-a command that will be refused again for the same reason.
-
-Observing the echo requires a quiet window, because each subsequent command
-overwrites `last_sequence`. The pre-arm freshness rule bounds that window at
-roughly 150 ms, which holds about seven frames at 50 Hz. A host arms like this:
-
-```text
-send  C,1,<n>,0,0
-send  A,1,<n+1>
-wait  ~150 ms without sending, reading telemetry:
-      last_sequence == n+1 and state == 1  -> armed
-      last_sequence == n+1 and state != 1  -> refused; read faults, fix the cause
-      last_sequence never reaches n+1      -> the command was lost; retry
-resume C at 50 Hz before the 250 ms command watchdog expires
-```
-
-Do not move the echo assignment in `tryArm()` or `tryClearFaults()` below their
-guard clauses while tidying. Nothing in the sketch fails if you do; the host simply
-loses its ability to tell a refusal from a lost command.
-
 ## Host startup sequence
 
-After opening the USB serial port, allow for an Arduino reset and wait for the
-`B` line or telemetry. Then:
+After opening the USB serial port, allow for an Arduino reset. Drain old input,
+send a newline to terminate any partial command, and send `D,2`. Wait for fresh
+telemetry showing `DISARMED` before arming; report an existing fault instead of
+automatically clearing it. Valid telemetry establishes the connection.
+
+Then arm with:
 
 ```text
-C,1,1,0,0
-A,1,2
-C,1,3,1000,1000
-C,1,4,1000,1000
-...
+C,2,0,0
+A,2
 ```
+
+Keep sending `C,2,0,0` at 20–50 Hz while waiting for fresh telemetry showing
+`ARMED`. Only then send nonzero targets such as `C,2,1000,1000`. On a fault or a
+one-second arm timeout, send `D,2` and report the last observed state and faults.
+A timeout does not distinguish a refused command from a communication failure,
+and fault bits do not describe every possible arm precondition.
 
 Continue sending `C` commands at 20-50 Hz, including when the target is zero.
 To stop normally, send a zero-speed command and then `D`:
 
 ```text
-C,1,20,0,0
-D,1,21
+C,2,0,0
+D,2
 ```
 
 After a fault, send a fresh zero command, clear, and arm again only after the
 cause has been corrected:
 
 ```text
-C,1,30,0,0
-F,1,31
-A,1,32
+C,2,0,0
+F,2
 ```
 
-Two preconditions make that ordering load-bearing. `F` is refused while either
-requested target is nonzero, so a host that keeps streaming motion commands into a
-fault clears nothing and stays faulted indefinitely — stop commanding motion first.
-And latching a fault discards the stored wheel command, so `A` needs a zero `C`
-that arrives after the fault and no more than 250 ms before it. Both refusals are
-silent except through the sequence echo described above.
+Continue streaming zeros and wait for `DISARMED`, then repeat the arm procedure.
+`F` is refused while either requested target is nonzero. A fault discards the
+stored wheel command, so `A` needs a zero `C` after the fault and no more than
+250 ms before arming. If clearing times out, report failure and remain stopped.
 
 ## Values that require hardware calibration
 
@@ -198,8 +163,9 @@ direction, so correct wiring/sign conventions before continuing.
 4. Send zero `C`, then `A`, and verify state `1` with zero PWM.
 5. Stream a small target such as `1000,1000` and check speed signs.
 6. Stop sending commands and verify a timeout fault within roughly 250 ms.
-7. Clear and re-arm, then test `D`, malformed input, an oversized target, and
-   unplugging USB.
+7. Verify malformed input leaves a disarmed controller disarmed. Clear and
+   re-arm, then test `D`, malformed input while armed, an oversized target, and
+   unplugging USB. Malformed input must not clear a latched fault.
 8. Briefly restrain one raised wheel only if it is mechanically safe, and verify
    the appropriate stall fault. Do not hold a stalled motor unnecessarily.
 9. Repeat at low speed on the floor only after all stop paths work.
@@ -219,3 +185,23 @@ python3 Rovbot/tools/motor_serial_test.py \
 Use `--clear-faults` after correcting a reported fault. The utility refuses to
 run without the explicit `--wheels-raised` acknowledgement and limits each run
 to ten seconds. It is a bench tool, not the eventual Raspberry Pi service.
+
+## Host checks without hardware
+
+From the repository root, with the Python environment above activated:
+
+```sh
+c++ -std=c++17 -Wall -Wextra -Werror \
+  -I Rovbot/firmware/motor_controller/tests \
+  Rovbot/firmware/motor_controller/tests/controller_test.cpp \
+  Rovbot/firmware/motor_controller/serial_protocol.cpp \
+  Rovbot/firmware/motor_controller/wheel_controller.cpp \
+  -o /tmp/rovbot-controller-test
+/tmp/rovbot-controller-test
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s Rovbot/tools -p 'test_*.py'
+```
+
+The C++ checks run the real parser and sketch against a small Arduino shim. The
+Python checks use mocked serial I/O and time. They cover protocol compatibility,
+fragmented input, state transitions, timeouts, and telemetry formatting; they do
+not replace the wheels-raised checks of actual USB timing and motor behavior.

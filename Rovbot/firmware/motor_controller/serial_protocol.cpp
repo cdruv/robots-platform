@@ -6,29 +6,8 @@
 
 namespace SerialProtocol {
 namespace {
-constexpr uint8_t PROTOCOL_VERSION = 1;
+constexpr char PROTOCOL_VERSION[] = "2";
 constexpr uint8_t MAX_SERIAL_BYTES_PER_LOOP = 64;
-
-bool parseUnsigned32(const char *text, uint32_t &value)
-{
-  if (*text == '\0') {
-    return false;
-  }
-
-  uint32_t result = 0;
-  for (const char *p = text; *p != '\0'; ++p) {
-    if (*p < '0' || *p > '9') {
-      return false;
-    }
-    const uint32_t digit = static_cast<uint32_t>(*p - '0');
-    if (result > (UINT32_MAX - digit) / 10u) {
-      return false;
-    }
-    result = result * 10u + digit;
-  }
-  value = result;
-  return true;
-}
 
 bool parseSigned32(const char *text, int32_t &value)
 {
@@ -85,37 +64,33 @@ size_t splitTokens(char *line, char **tokens, size_t maxTokens)
   return count;
 }
 
-bool parseHeader(char **tokens, size_t tokenCount, size_t expectedCount,
-                 uint32_t &sequence)
+bool parseHeader(char **tokens, size_t tokenCount, size_t expectedCount)
 {
-  uint32_t version = 0;
   return tokenCount == expectedCount &&
-         parseUnsigned32(tokens[1], version) &&
-         version == PROTOCOL_VERSION &&
-         parseUnsigned32(tokens[2], sequence);
+         strcmp(tokens[1], PROTOCOL_VERSION) == 0;
 }
 
 Command parseLine(char *line)
 {
   Command command;
-  char *tokens[6];
-  const size_t tokenCount = splitTokens(line, tokens, 6);
+  char *tokens[4];
+  const size_t tokenCount = splitTokens(line, tokens, 4);
   if (tokenCount == 0 || strlen(tokens[0]) != 1) {
     return command;
   }
 
   switch (tokens[0][0]) {
     case 'C':
-      if (parseHeader(tokens, tokenCount, 5, command.sequence) &&
-          parseSigned32(tokens[3], command.leftMradS) &&
-          parseSigned32(tokens[4], command.rightMradS)) {
+      if (parseHeader(tokens, tokenCount, 4) &&
+          parseSigned32(tokens[2], command.leftMradS) &&
+          parseSigned32(tokens[3], command.rightMradS)) {
         command.type = CommandType::WHEEL_SPEED;
       }
       break;
     case 'A':
     case 'D':
     case 'F':
-      if (parseHeader(tokens, tokenCount, 3, command.sequence)) {
+      if (parseHeader(tokens, tokenCount, 2)) {
         command.type = tokens[0][0] == 'A' ? CommandType::ARM
                        : tokens[0][0] == 'D' ? CommandType::DISARM
                                             : CommandType::CLEAR_FAULTS;
@@ -162,30 +137,12 @@ void Receiver::poll(Stream &input, void (*onCommand)(const Command &))
   }
 }
 
-void publishBoot(Print &output, const BootInfo &info)
-{
-  output.print(F("B,"));
-  output.print(PROTOCOL_VERSION);
-  output.print(',');
-  output.print(info.countsPerRev);
-  output.print(',');
-  output.print(info.controlPeriodMs);
-  output.print(',');
-  output.print(info.commandTimeoutMs);
-  output.print(',');
-  output.print(info.maxPwm);
-  output.print(',');
-  output.println(info.maxTargetMradS);
-}
-
 void publishTelemetry(Print &output, const Telemetry &telemetry)
 {
   output.print(F("T,"));
   output.print(PROTOCOL_VERSION);
   output.print(',');
   output.print(telemetry.millis);
-  output.print(',');
-  output.print(telemetry.lastSequence);
   output.print(',');
   output.print(telemetry.state);
   output.print(',');
