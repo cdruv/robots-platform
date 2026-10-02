@@ -19,19 +19,31 @@ lifecycle control, detailed telemetry, and future hardware expansion.
 
 ### Initial stack
 - **App:** Kotlin, Android SDK, Gradle; Android Studio/ADB for development.
-- **Sensors:** CameraX initially; Android sensor and audio APIs.
-- **UI:** Native Android interface; choose the 3D renderer separately.
-- **Inference:** Multiple backend endpoints with some way of picking a model
-  or provider for certain type of work.
+  Code lives in [onboard-android](onboard-android/README.md): a pure Kotlin/JVM
+  `:core` module for all logic and contracts, and an Android `:app` module for
+  platform implementations.
+- **Sensors:** CameraX; Android sensor, speech recognition and audio APIs.
+- **Face:** Procedural 2D on Compose Canvas with AGSL shaders, behind a `Face`
+  contract so another renderer (e.g. 3D) can be swapped in. No 3D commitment.
+- **Inference:** One OpenAI-compatible backend pointed at OpenRouter, behind an
+  interface and a manager that will route work types to providers or models later.
 - **Body controller:** Pico 2 W + MicroPython for servo execution and watchdogs.
   Communicate with the Android app over local Wi-Fi.
 - **Research/training:** Python, PyTorch, MuJoCo, and Stable-Baselines3.
-- **Observability:** Timestamped structured logs, recording/replay, and Rerun.
+- **Observability:** Timestamped structured JSONL events to Logcat, files and a TCP
+  stream to the Mac; recording/replay and Rerun are bridged on the Mac, not the phone.
 
 ### Architecture constraints
 - Separate perception, world state, personality/planning, skills, locomotion,
   and hardware adapters. Divide into concrete subsystems.
+- Senses own sensing; outputs own expression and actuation. Keep them separate
+  even when they share hardware.
+- One executive owns robot state and processes events sequentially on a single
+  thread. Hardware and network work runs on its own loops at the edges and talks
+  to the executive only via events in and targets out; the executive never blocks.
+- Keep policy and cognition pure and unit-testable.
 - LLMs request bounded skills; they do not directly command servo angles.
+- Every event and decision is telemetered, so behaviour can be inspected and replayed.
 - Keep motion execution and safety local, independent of rendering and
   cloud availability. Offload heavier experiments to a workstation as needed.
 - Keep model backends and hardware interfaces replaceable.

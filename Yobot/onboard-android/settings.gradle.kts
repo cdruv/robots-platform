@@ -23,4 +23,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Yobot"
-include(":app")
+include(":core", ":app")
