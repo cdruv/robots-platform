@@ -21,21 +21,22 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.tooling.preview.Preview
 import com.vadymsidorov.yobot.core.output.Expression
 import com.vadymsidorov.yobot.core.output.FaceState
 import com.vadymsidorov.yobot.core.output.MouthMode
+import com.vadymsidorov.yobot.core.reflex.MotionReflex
+import com.vadymsidorov.yobot.core.senses.BodyMotion
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlin.math.PI
@@ -49,10 +50,19 @@ private object RealTimeMotion : MotionDurationScale {
     override val scaleFactor = 1f
 }
 
+/** An upright body at rest, for previews and wherever no IMU is connected. */
+private object StillBody : MotionReflex {
+    override val bodyMotion = MutableStateFlow(BodyMotion())
+}
+
 /**
- * The "Rain + Glow" face: falling glyph rain, a vignette, two glowing eyes with pupils, and a
- * bar mouth. It draws whatever [target] says and adds ambient motion (rain, glow, gaze wander,
+ * The "Rain + Glow" face: a rain of glowing particles that behaves as a liquid, two glowing eyes with pupils,
+ * and a bar mouth. It draws whatever [target] says and adds ambient motion (glow, gaze wander,
  * blinks) on independent clocks that expression changes never reset.
+ *
+ * [motionReflex] is a reflex: IMU samples read here every frame, straight from the sense,
+ * without passing through the Executive. They move the liquid and make the eyes, pupils and
+ * mouth sway and stay level (see [FaceMotion]); they never change [target].
  *
  * With [overlayVisible] the face recedes behind the debug overlay. With [reducedMotion] only
  * the blink moves. Reactions are not rendered yet.
@@ -61,6 +71,7 @@ private object RealTimeMotion : MotionDurationScale {
 fun FaceRenderer(
     target: FaceState,
     modifier: Modifier = Modifier,
+    motionReflex: MotionReflex = StillBody,
     overlayVisible: Boolean = false,
     reducedMotion: Boolean = systemAnimationsOff(),
 ) {
@@ -77,7 +88,7 @@ fun FaceRenderer(
     }
     val overlay = animateFloatAsState(if (overlayVisible) 1f else 0f, tween(FaceSpec.OVERLAY_FADE_MS), label = "overlay")
 
-    // One clock for rain, glow and the mouth cursor. It stays at zero under reduced motion.
+    // One clock for the liquid, body motion, glow and the mouth cursor. It stays at zero under reduced motion.
     val clockNanos = remember { mutableLongStateOf(0L) }
     val gaze = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
     LaunchedEffect(reducedMotion) {
@@ -123,8 +134,7 @@ fun FaceRenderer(
         }
     }
 
-    val measurer = rememberTextMeasurer()
-    val columns = remember { rainColumns() }
+    val motion = remember { FaceMotion() }
     val shapes = remember { GlowRectPainter() }
     val pupilClip = remember { Path() }
 
@@ -132,35 +142,28 @@ fun FaceRenderer(
         modifier.fillMaxSize().drawWithCache {
             val unit = size.width / FaceSpec.FRAME_WIDTH
             val frameTop = (size.height - FaceSpec.FRAME_HEIGHT * unit) / 2f
-            val rain = RainLayer(columns, measurer, this, unit)
-            val vignetteCenter = Offset(size.width * 0.5f, size.height * 0.45f)
-            val vignetteRadius = size.width * 0.8f
-            val vignetteSquash = size.height * 0.55f / vignetteRadius
-            val vignette = Brush.radialGradient(
-                0.25f to FaceSpec.Background.copy(alpha = 0f),
-                0.9f to FaceSpec.Background,
-                center = vignetteCenter,
-                radius = vignetteRadius,
-            )
+            val pivot = Offset(FaceSpec.LEVEL_PIVOT_X * unit, FaceSpec.LEVEL_PIVOT_Y * unit)
 
             onDrawBehind {
                 val seconds = clockNanos.longValue / 1e9
                 val dim = overlay.value
                 val state = mouth.value
 
+                // Reflex input: the latest IMU sample, read directly from the sense.
+                motion.advance(seconds, motionReflex.bodyMotion.value, size.height / unit)
+
                 drawRect(FaceSpec.Background)
-                rain.draw(this, seconds, mix(FaceSpec.RAIN_ALPHA, FaceSpec.RAIN_ALPHA_OVERLAY, dim))
-                scale(1f, vignetteSquash, pivot = vignetteCenter) {
-                    val reach = size.height / vignetteSquash
-                    drawRect(vignette, Offset(0f, vignetteCenter.y - reach), Size(size.width, 2f * reach))
-                }
+                motion.liquid.draw(this, unit, mix(FaceSpec.LIQUID_ALPHA, FaceSpec.LIQUID_ALPHA_OVERLAY, dim))
 
                 translate(top = frameTop) {
-                    val breathe = (0.5 - 0.5 * cos(2.0 * PI * seconds / FaceSpec.GLOW_SECONDS)).toFloat()
-                    val eye = pose.value
-                    drawEye(shapes, pupilClip, eye, FaceSpec.EYE_LEFT_X, blinkLeft.value, gaze.value, breathe, dim, unit)
-                    drawEye(shapes, pupilClip, eye, FaceSpec.EYE_RIGHT_X, blinkRight.value, gaze.value, breathe, dim, unit)
-                    drawMouth(shapes, state.mouth, state.mouthLevel, seconds, 1f - dim, unit)
+                    rotate(motion.roll, pivot) {
+                        val breathe = (0.5 - 0.5 * cos(2.0 * PI * seconds / FaceSpec.GLOW_SECONDS)).toFloat()
+                        val eye = pose.value
+                        val sway = Offset(motion.eyeX, motion.eyeY)
+                        drawEye(shapes, pupilClip, eye, FaceSpec.EYE_LEFT_X, blinkLeft.value, gaze.value, sway, breathe, dim, unit)
+                        drawEye(shapes, pupilClip, eye, FaceSpec.EYE_RIGHT_X, blinkRight.value, gaze.value, sway, breathe, dim, unit)
+                        drawMouth(shapes, state.mouth, state.mouthLevel, Offset(motion.mouthX, motion.mouthY), seconds, 1f - dim, unit)
+                    }
                 }
             }
         },
@@ -172,7 +175,10 @@ private suspend fun Animatable<Float, *>.blink() {
     animateTo(1f, tween(FaceSpec.BLINK_OPEN_MS))
 }
 
-/** [dim] is 0 for the normal face and 1 behind the debug overlay, where only a faint rim remains. */
+/**
+ * [sway] moves the eye with the body, in design dp; the pupil travels further the same way.
+ * [dim] is 0 for the normal face and 1 behind the debug overlay, where only a faint rim remains.
+ */
 private fun DrawScope.drawEye(
     shapes: GlowRectPainter,
     pupilClip: Path,
@@ -180,11 +186,12 @@ private fun DrawScope.drawEye(
     centerX: Float,
     blink: Float,
     gaze: Offset,
+    sway: Offset,
     breathe: Float,
     dim: Float,
     unit: Float,
 ) {
-    val center = Offset((centerX + eye.offsetX) * unit, eye.centerY * unit)
+    val center = Offset((centerX + eye.offsetX + sway.x) * unit, (eye.centerY + sway.y) * unit)
     val halfWidth = eye.width * unit / 2f
     val halfHeight = eye.height * unit / 2f
     val (topRadius, bottomRadius) = fitRadii(eye.width * unit, eye.height * unit, eye.topRadius * unit, eye.bottomRadius * unit)
@@ -211,8 +218,8 @@ private fun DrawScope.drawEye(
             roundRectPath(pupilClip, center, halfWidth - stroke, halfHeight - stroke, topRadius - stroke, bottomRadius - stroke)
             clipPath(pupilClip) {
                 val pupil = center + Offset(
-                    (gaze.x * eye.wander + eye.gazeX) * unit,
-                    (gaze.y * eye.wander + eye.gazeY) * unit,
+                    (gaze.x * eye.wander + eye.gazeX + sway.x * FaceSpec.PUPIL_FOLLOW) * unit,
+                    (gaze.y * eye.wander + eye.gazeY + sway.y * FaceSpec.PUPIL_FOLLOW) * unit,
                 )
                 val scaled = eye.pupilScale * unit
                 val pupilHalfWidth = FaceSpec.PUPIL_WIDTH * scaled / 2f
@@ -244,13 +251,14 @@ private fun DrawScope.drawMouth(
     shapes: GlowRectPainter,
     mode: MouthMode,
     level: Float,
+    sway: Offset,
     seconds: Double,
     alpha: Float,
     unit: Float,
 ) {
     val cycle = ((seconds / FaceSpec.MOUTH_CYCLE_SECONDS) % 1.0).toFloat()
     val amount = level.coerceIn(0f, 1f)
-    var centerX = FaceSpec.MOUTH_X
+    var centerX = FaceSpec.MOUTH_X + sway.x
     val width: Float
     when (mode) {
         MouthMode.Idle -> {
@@ -266,7 +274,7 @@ private fun DrawScope.drawMouth(
     }
     val radius = FaceSpec.MOUTH_HEIGHT * unit / 2f
     shapes.draw(
-        this, Offset(centerX * unit, FaceSpec.MOUTH_Y * unit), width * unit / 2f, radius, radius, radius,
+        this, Offset(centerX * unit, (FaceSpec.MOUTH_Y + sway.y) * unit), width * unit / 2f, radius, radius, radius,
         fill = FaceSpec.EyeRim,
         glow = FaceSpec.EyeRim,
         outerSigma = FaceSpec.MOUTH_GLOW_SIGMA * unit,

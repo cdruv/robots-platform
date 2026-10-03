@@ -57,7 +57,7 @@ class MainActivity : ComponentActivity() {
             val target by brain.face.state.collectAsStateWithLifecycle()
             var showDebug by rememberSaveable { mutableStateOf(false) }
             Box(Modifier.fillMaxSize().background(FaceBackground)) {
-                FaceRenderer(target, overlayVisible = showDebug)
+                FaceRenderer(target, motionReflex = brain.faceMotionReflex, overlayVisible = showDebug)
                 AnimatedVisibility(showDebug, enter = fadeIn(OverlayFade), exit = fadeOut(OverlayFade)) {
                     DebugOverlay(brain, Modifier.fillMaxSize())
                 }
@@ -72,9 +72,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) {
-            brain.startSenses()
-        } else {
+        // Senses that need no permission start now; hearing joins once the microphone is granted.
+        brain.startSenses()
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestMicrophone.launch(Manifest.permission.RECORD_AUDIO)
         }
     }

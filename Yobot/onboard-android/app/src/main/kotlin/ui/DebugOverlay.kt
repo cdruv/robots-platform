@@ -79,10 +79,11 @@ fun DebugToggle(active: Boolean, onClick: () -> Unit, modifier: Modifier = Modif
     }
 }
 
-/** Hearing status, telemetry stream status, and the most recent telemetry events. */
+/** Hearing status, the IMU reflex feed, telemetry stream status, and the most recent telemetry events. */
 @Composable
 fun DebugOverlay(brain: Brain, modifier: Modifier = Modifier) {
     val hearing by brain.hearing.status.collectAsStateWithLifecycle()
+    val body by brain.faceMotionReflex.bodyMotion.collectAsStateWithLifecycle()
     val server by brain.telemetryServer.status.collectAsStateWithLifecycle()
     val events by brain.recentEvents.events.collectAsStateWithLifecycle()
     var showPartial by remember { mutableStateOf(false) }
@@ -127,6 +128,11 @@ fun DebugOverlay(brain: Brain, modifier: Modifier = Modifier) {
             maxLines = 3,
         )
         Spacer(Modifier.height(6.dp))
+        BasicText(
+            "imu → face (reflex, no executive)  roll %.0f°  pitch %.0f°  accel %.1f"
+                .format(Locale.US, body.rollDegrees, body.pitchDegrees, body.accelMagnitude),
+            style = Mono.copy(color = Dim),
+        )
         BasicText(
             buildString {
                 append("stream ")
