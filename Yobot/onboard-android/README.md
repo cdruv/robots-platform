@@ -1,6 +1,6 @@
 # Yobot onboard app
 
-Native Android app for Yobot on the Pixel 8. It renders one static neutral face full-screen
+Native Android app for Yobot on the Pixel 8. It renders an animated face full-screen
 in portrait, keeps the screen on, listens continuously with on-device speech recognition,
 and streams structured telemetry (including every transcript) to Logcat, to a TCP port for
 the workstation, and to a debug overlay on top of the face.
@@ -28,7 +28,8 @@ the foreground. `local.properties` only needs `sdk.dir`.
 
 ## Debug overlay
 
-Tap the faint round button in the bottom-right corner to show or hide the overlay. It shows:
+Tap the round three-dot button in the bottom-right corner to show or hide the overlay. The face
+dims behind it. It shows:
 
 - hearing state (listening, speech, muted, error), recognizer engine, session count, and a
   mic level bar, with a `[mute]` toggle;

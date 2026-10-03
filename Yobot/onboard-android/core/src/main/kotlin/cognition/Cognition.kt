@@ -17,7 +17,7 @@ interface Cognition {
 @Serializable
 data class Intent(
     val speech: String? = null,
-    val expression: Expression = Expression.Neutral,
+    val expression: Expression = Expression.Idle,
     val actions: List<SkillCall> = emptyList(),
     val thought: String? = null,
 )

@@ -5,6 +5,7 @@ import com.vadymsidorov.yobot.core.events.RequestId
 import com.vadymsidorov.yobot.core.events.UtteranceId
 import com.vadymsidorov.yobot.core.output.FaceState
 import com.vadymsidorov.yobot.core.output.HapticPattern
+import com.vadymsidorov.yobot.core.output.Reaction
 import com.vadymsidorov.yobot.core.output.SoundName
 import com.vadymsidorov.yobot.core.skills.SkillCall
 import com.vadymsidorov.yobot.core.state.RobotState
@@ -40,6 +41,10 @@ sealed interface Effect {
     @Serializable
     @SerialName("SetFace")
     data class SetFace(val face: FaceState) : Effect
+
+    @Serializable
+    @SerialName("React")
+    data class React(val reaction: Reaction) : Effect
 
     @Serializable
     @SerialName("Say")

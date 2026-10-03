@@ -2,6 +2,7 @@ package com.vadymsidorov.yobot.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -28,7 +29,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,28 +46,36 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp, lineHeight = 14.sp)
-private val Dim = Color(0.65f, 0.7f, 0.75f)
-private val Bright = Color(0.92f, 0.95f, 1f)
-private val Cyan = Color(0.35f, 0.85f, 1f)
+// Palette and metrics from the face design handoff. Green, amber and red are status colours
+// the handoff does not cover.
+private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 17.sp)
+private val Dim = Color(0xFF9A5A9C)
+private val Timestamp = Color(0xFF8A3A8C)
+private val Bright = Color(0xFFFDE8FF)
+private val Cyan = Color(0xFF5FE3FF)
 private val Amber = Color(1f, 0.75f, 0.25f)
 private val Red = Color(1f, 0.4f, 0.4f)
 private val Green = Color(0.45f, 0.9f, 0.5f)
+private val FabFill = Color(0xFF1B1522)
+private val FabDots = Color(0xFF6B6B7A)
 
-/** Small translucent button in a corner; tapping toggles [DebugOverlay]. */
+/** Round three-dot button in the bottom-right corner; tapping toggles [DebugOverlay]. */
 @Composable
 fun DebugToggle(active: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Box(
+    Column(
         modifier
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(14.dp)
-            .size(40.dp)
+            .padding(18.dp)
+            .size(38.dp)
             .clip(CircleShape)
-            .background(Color.White.copy(alpha = if (active) 0.3f else 0.1f))
+            .background(FabFill)
             .clickable(interactionSource = null, indication = null, onClick = onClick),
-        contentAlignment = Alignment.Center,
+        verticalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        BasicText("⋮", style = Mono.copy(fontSize = 18.sp, color = Color.White.copy(alpha = 0.8f)))
+        repeat(3) {
+            Box(Modifier.size(4.dp).clip(CircleShape).background(if (active) Cyan else FabDots))
+        }
     }
 }
 
@@ -81,9 +93,8 @@ fun DebugOverlay(brain: Brain, modifier: Modifier = Modifier) {
 
     Column(
         modifier
-            .background(Color.Black.copy(alpha = 0.78f))
             .windowInsetsPadding(WindowInsets.safeDrawing)
-            .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = 72.dp),
+            .padding(start = 23.dp, top = 23.dp, end = 23.dp, bottom = 81.dp),
     ) {
         val stateColor = when (hearing.state) {
             HearingState.Listening -> Green
@@ -112,7 +123,7 @@ fun DebugOverlay(brain: Brain, modifier: Modifier = Modifier) {
         hearing.lastError?.let { BasicText("error $it", style = Mono.copy(color = Red)) }
         BasicText(
             if (hearing.partial.isNotEmpty()) "› ${hearing.partial}" else "  ${hearing.lastFinal}",
-            style = Mono.copy(color = if (hearing.partial.isNotEmpty()) Cyan else Bright, fontSize = 13.sp, lineHeight = 17.sp),
+            style = Mono.copy(color = if (hearing.partial.isNotEmpty()) Cyan else Bright),
             maxLines = 3,
         )
         Spacer(Modifier.height(6.dp))
@@ -155,14 +166,17 @@ private fun EventRow(event: TelemetryEvent, time: SimpleDateFormat) {
         "PARTIAL" -> Dim
         else -> Bright
     }
-    Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 5.dp)) {
+    Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 5.5.dp)) {
         BasicText(
-            "${time.format(Date(event.tsWallMs))}  ${summary.label}  ${event.source}  ${if (expanded) "−" else "+"}",
+            buildAnnotatedString {
+                withStyle(SpanStyle(color = Timestamp)) { append(time.format(Date(event.tsWallMs))) }
+                append("  ${summary.label}  ${event.source}  ${if (expanded) "−" else "+"}")
+            },
             style = Mono.copy(color = color),
         )
         BasicText(
             summary.message,
-            style = Mono.copy(color = color, fontSize = 13.sp, lineHeight = 17.sp),
+            style = Mono.copy(color = color),
             maxLines = if (expanded) Int.MAX_VALUE else 2,
             overflow = TextOverflow.Ellipsis,
         )

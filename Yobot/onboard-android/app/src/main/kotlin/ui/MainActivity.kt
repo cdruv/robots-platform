@@ -8,6 +8,10 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -24,6 +28,9 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vadymsidorov.yobot.YobotApplication
 import com.vadymsidorov.yobot.face.FaceRenderer
+
+private val FaceBackground = Color(0xFF0D0712)
+private val OverlayFade = tween<Float>(240)
 
 /**
  * Full-screen face with a small corner button that toggles the debug overlay. Senses run
@@ -49,9 +56,11 @@ class MainActivity : ComponentActivity() {
         setContent {
             val target by brain.face.state.collectAsStateWithLifecycle()
             var showDebug by rememberSaveable { mutableStateOf(false) }
-            Box(Modifier.fillMaxSize().background(Color.Black)) {
-                FaceRenderer(target)
-                if (showDebug) DebugOverlay(brain, Modifier.fillMaxSize())
+            Box(Modifier.fillMaxSize().background(FaceBackground)) {
+                FaceRenderer(target, overlayVisible = showDebug)
+                AnimatedVisibility(showDebug, enter = fadeIn(OverlayFade), exit = fadeOut(OverlayFade)) {
+                    DebugOverlay(brain, Modifier.fillMaxSize())
+                }
                 DebugToggle(
                     active = showDebug,
                     onClick = { showDebug = !showDebug },
