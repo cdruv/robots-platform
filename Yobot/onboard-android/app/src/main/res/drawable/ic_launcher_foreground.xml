@@ -1,30 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:aapt="http://schemas.android.com/aapt"
-    android:width="108dp"
-    android:height="108dp"
-    android:viewportWidth="108"
-    android:viewportHeight="108">
-    <path android:pathData="M31,63.928c0,0 6.4,-11 12.1,-13.1c7.2,-2.6 26,-1.4 26,-1.4l38.1,38.1L107,108.928l-32,-1L31,63.928z">
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- outer glow -->
+    <path android:pathData="M14,21.25h52v56h-52z">
         <aapt:attr name="android:fillColor">
-            <gradient
-                android:endX="85.84757"
-                android:endY="92.4963"
-                android:startX="42.9492"
-                android:startY="49.59793"
-                android:type="linear">
-                <item
-                    android:color="#44000000"
-                    android:offset="0.0" />
-                <item
-                    android:color="#00000000"
-                    android:offset="1.0" />
+            <gradient android:type="radial" android:centerX="40" android:centerY="49.25" android:gradientRadius="26">
+                <item android:offset="0.0" android:color="#733ccfff"/>
+                <item android:offset="0.45" android:color="#403ccfff"/>
+                <item android:offset="1.0" android:color="#003ccfff"/>
             </gradient>
         </aapt:attr>
     </path>
-    <path
-        android:fillColor="#FFFFFF"
-        android:fillType="nonZero"
-        android:pathData="M65.3,45.828l3.8,-6.6c0.2,-0.4 0.1,-0.9 -0.3,-1.1c-0.4,-0.2 -0.9,-0.1 -1.1,0.3l-3.9,6.7c-6.3,-2.8 -13.4,-2.8 -19.7,0l-3.9,-6.7c-0.2,-0.4 -0.7,-0.5 -1.1,-0.3C38.8,38.328 38.7,38.828 38.9,39.228l3.8,6.6C36.2,49.428 31.7,56.028 31,63.928h46C76.3,56.028 71.8,49.428 65.3,45.828zM43.4,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2c-0.3,-0.7 -0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C45.3,56.528 44.5,57.328 43.4,57.328L43.4,57.328zM64.6,57.328c-0.8,0 -1.5,-0.5 -1.8,-1.2s-0.1,-1.5 0.4,-2.1c0.5,-0.5 1.4,-0.7 2.1,-0.4c0.7,0.3 1.2,1 1.2,1.8C66.5,56.528 65.6,57.328 64.6,57.328L64.6,57.328z"
-        android:strokeWidth="1"
-        android:strokeColor="#00000000" />
+    <path android:fillColor="#0b2230" android:pathData="M36,37.25h8a6,6 0 0 1 6,6v12a6,6 0 0 1 -6,6h-8a6,6 0 0 1 -6,-6v-12a6,6 0 0 1 6,-6z"/>
+    <group>
+        <clip-path android:pathData="M36,37.25h8a6,6 0 0 1 6,6v12a6,6 0 0 1 -6,6h-8a6,6 0 0 1 -6,-6v-12a6,6 0 0 1 6,-6z"/>
+        <path android:pathData="M26,33.25h28v32h-28z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="radial" android:centerX="40" android:centerY="48.25" android:gradientRadius="12">
+                    <item android:offset="0.0" android:color="#b33ccfff"/>
+                    <item android:offset="1.0" android:color="#003ccfff"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:fillColor="#8fe9ff" android:pathData="M38.5,42.25h3a3.5,3.5 0 0 1 3.5,3.5v5a3.5,3.5 0 0 1 -3.5,3.5h-3a3.5,3.5 0 0 1 -3.5,-3.5v-5a3.5,3.5 0 0 1 3.5,-3.5z"/>
+        <path android:fillColor="#eafcff" android:pathData="M37.7,43.650000000000006a1.3,1.3 0 1 1 0,2.6a1.3,1.3 0 1 1 0,-2.6z"/>
+    </group>
+    <path android:strokeColor="#3ccfff" android:strokeWidth="1" android:fillColor="#00000000" android:pathData="M36,37.25h8a6,6 0 0 1 6,6v12a6,6 0 0 1 -6,6h-8a6,6 0 0 1 -6,-6v-12a6,6 0 0 1 6,-6z"/>
+    <!-- outer glow -->
+    <path android:pathData="M42,21.25h52v56h-52z">
+        <aapt:attr name="android:fillColor">
+            <gradient android:type="radial" android:centerX="68" android:centerY="49.25" android:gradientRadius="26">
+                <item android:offset="0.0" android:color="#733ccfff"/>
+                <item android:offset="0.45" android:color="#403ccfff"/>
+                <item android:offset="1.0" android:color="#003ccfff"/>
+            </gradient>
+        </aapt:attr>
+    </path>
+    <path android:fillColor="#0b2230" android:pathData="M64,37.25h8a6,6 0 0 1 6,6v12a6,6 0 0 1 -6,6h-8a6,6 0 0 1 -6,-6v-12a6,6 0 0 1 6,-6z"/>
+    <group>
+        <clip-path android:pathData="M64,37.25h8a6,6 0 0 1 6,6v12a6,6 0 0 1 -6,6h-8a6,6 0 0 1 -6,-6v-12a6,6 0 0 1 6,-6z"/>
+        <path android:pathData="M54,33.25h28v32h-28z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="radial" android:centerX="68" android:centerY="48.25" android:gradientRadius="12">
+                    <item android:offset="0.0" android:color="#b33ccfff"/>
+                    <item android:offset="1.0" android:color="#003ccfff"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:fillColor="#8fe9ff" android:pathData="M66.5,42.25h3a3.5,3.5 0 0 1 3.5,3.5v5a3.5,3.5 0 0 1 -3.5,3.5h-3a3.5,3.5 0 0 1 -3.5,-3.5v-5a3.5,3.5 0 0 1 3.5,-3.5z"/>
+        <path android:fillColor="#eafcff" android:pathData="M65.7,43.650000000000006a1.3,1.3 0 1 1 0,2.6a1.3,1.3 0 1 1 0,-2.6z"/>
+    </group>
+    <path android:strokeColor="#3ccfff" android:strokeWidth="1" android:fillColor="#00000000" android:pathData="M64,37.25h8a6,6 0 0 1 6,6v12a6,6 0 0 1 -6,6h-8a6,6 0 0 1 -6,-6v-12a6,6 0 0 1 6,-6z"/>
+    <group android:rotation="-5" android:pivotX="54" android:pivotY="70">
+        <path android:pathData="M38,64h32v12h-32z">
+            <aapt:attr name="android:fillColor">
+                <gradient android:type="linear" android:startX="54" android:startY="65" android:endX="54" android:endY="75">
+                    <item android:offset="0.0" android:color="#003ccfff"/>
+                    <item android:offset="0.5" android:color="#663ccfff"/>
+                    <item android:offset="1.0" android:color="#003ccfff"/>
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path android:fillColor="#3ccfff" android:pathData="M43.75,69.25h20.5a0.75,0.75 0 0 1 0.75,0.75v0a0.75,0.75 0 0 1 -0.75,0.75h-20.5a0.75,0.75 0 0 1 -0.75,-0.75v-0a0.75,0.75 0 0 1 0.75,-0.75z"/>
+    </group>
 </vector>
