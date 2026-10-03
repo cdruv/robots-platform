@@ -8,8 +8,6 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.RecognitionListener
-import android.speech.RecognitionSupport
-import android.speech.RecognitionSupportCallback
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import com.vadymsidorov.yobot.core.events.HeardUtterance
@@ -39,14 +37,12 @@ data class HearingStatus(
 
 /**
  * Continuous on-device speech recognition. Android ends a recognizer session after each
- * utterance or silence, so this listens in a loop: every result or error schedules the next
- * session. Partial and final transcripts are posted as [HeardUtterance]. All recognizer
- * calls run on the main thread, as the platform requires; [start] and [stop] can be called
- * from anywhere.
+ * utterance or silence, so this listens in a loop. Recoverable errors retry after a fixed
+ * delay; missing permissions or language models stop hearing. Partial and final transcripts
+ * are posted as [HeardUtterance]. All recognizer calls run on the main thread, as the
+ * platform requires; [start] and [stop] can be called from anywhere.
  *
- * Callbacks are tied to the recognizer and session that produced them: cancelling or
- * destroying a recognizer makes the service report a late `ERROR_CLIENT`, which must not be
- * treated as a failure of whatever runs next.
+ * Callbacks from destroyed recognizers or received while no session is active are ignored.
  */
 class HearingSense(private val context: Context, private val log: Logger) : Sense, HearingControl {
     override val name = "hearing"
@@ -56,7 +52,6 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
 
     private val main = Handler(Looper.getMainLooper())
     private var recognizer: SpeechRecognizer? = null
-    private var onDevice = false
     private var post: ((Percept) -> Unit)? = null
     private var running = false
     private var enabled = true
@@ -65,7 +60,6 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
     // Set once the service reports onReadyForSpeech. Cancelling before that leaves the
     // on-device service holding the microphone open with no session (seen on Pixel 8).
     private var ready = false
-    private var consecutiveErrors = 0
     private var lastPartial = ""
 
     private val listen = Runnable {
@@ -88,9 +82,15 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             }
             this.post = post
             running = true
-            consecutiveErrors = 0
-            createRecognizer(preferOnDevice = true)
-            recognizer?.let(::checkSupport)
+            if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
+                fail("ON_DEVICE_UNAVAILABLE")
+                return@post
+            }
+            val r = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
+            r.setRecognitionListener(Listener(r))
+            recognizer = r
+            current.update { it.copy(engine = "on-device", lastError = null) }
+            log.info("hearing using on-device recognizer, locale ${Locale.getDefault().toLanguageTag()}")
             listenSoon(0)
         }
     }
@@ -116,7 +116,6 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             log.info(if (enabled) "hearing unmuted" else "hearing muted")
             current.update { it.copy(muted = !enabled) }
             if (enabled) {
-                consecutiveErrors = 0
                 if (running && !listening) listenSoon(RESTART_DELAY_MS)
             } else {
                 main.removeCallbacks(listen)
@@ -127,52 +126,11 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
         }
     }
 
-    /** Cancels the current session; its late callbacks are ignored because [listening] is false. */
+    /** Cancels the current session and ignores callbacks while no session is active. */
     private fun endSession() {
         listening = false
         ready = false
         recognizer?.cancel()
-    }
-
-    private fun createRecognizer(preferOnDevice: Boolean) {
-        recognizer?.destroy()
-        onDevice = preferOnDevice && SpeechRecognizer.isOnDeviceRecognitionAvailable(context)
-        val r = if (onDevice) {
-            SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
-        } else {
-            SpeechRecognizer.createSpeechRecognizer(context)
-        }
-        r.setRecognitionListener(Listener(r))
-        recognizer = r
-        val engine = if (onDevice) "on-device" else "default"
-        current.update { it.copy(engine = engine) }
-        log.info("hearing using $engine recognizer, locale ${Locale.getDefault().toLanguageTag()}")
-    }
-
-    /** Logs which languages the recognizer has locally and asks it to fetch ours if missing. */
-    private fun checkSupport(r: SpeechRecognizer) {
-        val intent = recognizerIntent()
-        r.checkRecognitionSupport(intent, context.mainExecutor, object : RecognitionSupportCallback {
-            override fun onSupportResult(support: RecognitionSupport) {
-                if (r !== recognizer) return
-                val language = Locale.getDefault().toLanguageTag()
-                log.info(
-                    "recognition support: installed=${support.installedOnDeviceLanguages} " +
-                        "pending=${support.pendingOnDeviceLanguages}",
-                )
-                val installed = support.installedOnDeviceLanguages.any { it.equals(language, ignoreCase = true) }
-                val supported = support.supportedOnDeviceLanguages.any { it.equals(language, ignoreCase = true) }
-                if (onDevice && !installed && supported) {
-                    log.warn("on-device model for $language is not installed; requesting download")
-                    r.triggerModelDownload(intent)
-                }
-            }
-
-            override fun onError(error: Int) {
-                if (r !== recognizer) return
-                log.warn("checkRecognitionSupport failed: ${errorName(error)}")
-            }
-        })
     }
 
     private fun listenSoon(delayMs: Long) {
@@ -184,11 +142,10 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-        putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true)
         putExtra(RecognizerIntent.EXTRA_CALLING_PACKAGE, context.packageName)
     }
 
-    /** Listener for one recognizer; drops callbacks from replaced recognizers or ended sessions. */
+    /** Drops callbacks from destroyed recognizers or received while no session is active. */
     private inner class Listener(private val owner: SpeechRecognizer) : RecognitionListener {
         private val active get() = owner === recognizer && listening
 
@@ -227,11 +184,11 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             if (!active) return
             listening = false
             ready = false
-            consecutiveErrors = 0
             if (!enabled) return // Muted while the session was starting.
             val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()
             val confidence = results.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)?.firstOrNull()
-            if (!text.isNullOrEmpty()) postFinal(text, confidence) else postPartialAsFinal()
+            current.update { it.copy(partial = "") }
+            if (!text.isNullOrEmpty()) postFinal(text, confidence)
             listenSoon(RESTART_DELAY_MS)
         }
 
@@ -242,36 +199,19 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             if (!enabled) return // Muted while the session was starting; unmute restarts it.
             val name = errorName(error)
             when (error) {
-                // Silence. Normal in a listening loop; start the next session right away.
+                // Silence is normal in a continuous listening loop.
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                    consecutiveErrors = 0
-                    postPartialAsFinal()
                     current.update { it.copy(partial = "") }
                     listenSoon(RESTART_DELAY_MS)
                 }
-                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> {
-                    log.error("hearing stopped: $name")
-                    running = false
-                    current.update { it.copy(state = HearingState.NoPermission, lastError = name) }
-                }
+                SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> fail(name, HearingState.NoPermission)
                 SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED,
                 SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE,
-                SpeechRecognizer.ERROR_SERVER_DISCONNECTED,
-                -> if (onDevice) {
-                    log.warn("on-device recognizer error $name; falling back to default recognizer")
-                    current.update { it.copy(lastError = name) }
-                    createRecognizer(preferOnDevice = false)
-                    listenSoon(RESTART_DELAY_MS)
-                } else {
-                    retryAfterError(name)
-                }
+                -> fail(name)
                 else -> {
-                    // A fresh recognizer is cheap; try one once retries on this one keep failing.
-                    if (consecutiveErrors >= RECREATE_AFTER_ERRORS) {
-                        log.warn("recognizer error $name; recreating recognizer")
-                        createRecognizer(preferOnDevice = onDevice)
-                    }
-                    retryAfterError(name)
+                    log.warn("recognizer error $name; retrying in ${ERROR_DELAY_MS}ms")
+                    current.update { it.copy(state = HearingState.Error, partial = "", lastError = name) }
+                    listenSoon(ERROR_DELAY_MS)
                 }
             }
         }
@@ -286,28 +226,21 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
         post?.invoke(HeardUtterance(text, isFinal = true, confidence = confidence))
     }
 
-    /**
-     * The on-device recognizer sometimes ends a session that produced partials with an empty
-     * result or NO_MATCH; the last partial is then the best transcript we have.
-     */
-    private fun postPartialAsFinal() {
-        if (lastPartial.isNotEmpty()) postFinal(lastPartial, confidence = null)
-    }
-
-    /** Backs off exponentially on repeated failures so a broken recognizer does not spin. */
-    private fun retryAfterError(name: String) {
-        consecutiveErrors++
-        val delay = (ERROR_DELAY_MS shl (consecutiveErrors - 1).coerceAtMost(5)).coerceAtMost(MAX_ERROR_DELAY_MS)
-        log.warn("recognizer error $name (#$consecutiveErrors); retrying in ${delay}ms")
-        current.update { it.copy(state = HearingState.Error, partial = "", lastError = name) }
-        listenSoon(delay)
+    private fun fail(error: String, state: HearingState = HearingState.Error) {
+        running = false
+        listening = false
+        ready = false
+        main.removeCallbacks(listen)
+        recognizer?.destroy()
+        recognizer = null
+        post = null
+        current.update { it.copy(state = state, partial = "", rmsDb = -2f, lastError = error) }
+        log.error("hearing stopped: $error")
     }
 
     private companion object {
         const val RESTART_DELAY_MS = 150L
         const val ERROR_DELAY_MS = 1_000L
-        const val MAX_ERROR_DELAY_MS = 30_000L
-        const val RECREATE_AFTER_ERRORS = 2
 
         fun errorName(code: Int): String = when (code) {
             SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "NETWORK_TIMEOUT"
