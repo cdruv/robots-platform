@@ -59,7 +59,7 @@ class MainActivity : ComponentActivity() {
             Box(Modifier.fillMaxSize().background(FaceBackground)) {
                 FaceRenderer(target, motionReflex = brain.faceMotionReflex, overlayVisible = showDebug)
                 AnimatedVisibility(showDebug, enter = fadeIn(OverlayFade), exit = fadeOut(OverlayFade)) {
-                    DebugOverlay(brain, Modifier.fillMaxSize())
+                    DebugOverlay(brain, window, Modifier.fillMaxSize())
                 }
                 DebugToggle(
                     active = showDebug,

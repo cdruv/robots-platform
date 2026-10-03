@@ -12,6 +12,14 @@ class RecentEventsSink(private val capacity: Int = 300) : TelemetrySink {
     private val current = MutableStateFlow<List<TelemetryEvent>>(emptyList())
     val events: StateFlow<List<TelemetryEvent>> = current.asStateFlow()
 
+    /** Clears only the on-screen history; other telemetry sinks keep running. */
+    fun clear() {
+        synchronized(buffer) {
+            buffer.clear()
+            current.value = emptyList()
+        }
+    }
+
     override fun write(batch: List<TelemetryEvent>) {
         synchronized(buffer) {
             batch.forEach { buffer.addLast(it) }

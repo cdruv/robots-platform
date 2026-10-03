@@ -1,7 +1,6 @@
 package com.vadymsidorov.yobot
 
 import android.content.Context
-import com.vadymsidorov.yobot.core.events.HeardUtterance
 import com.vadymsidorov.yobot.core.events.Percept
 import com.vadymsidorov.yobot.core.inference.Inference
 import com.vadymsidorov.yobot.core.reflex.MotionReflex
@@ -79,8 +78,7 @@ class Brain(context: Context) {
     }
 
     private fun onPercept(percept: Percept) {
-        // Partials arrive several times a second while someone talks; the overlay shows them live.
-        if (percept is HeardUtterance && !percept.isFinal) return
+        // Keep partials in the bounded telemetry history; the debug view filters them by default.
         telemetry.emit("sense", percept::class.simpleName ?: "Percept", Percept.serializer(), percept)
     }
 }
