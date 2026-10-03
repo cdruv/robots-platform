@@ -1,28 +1,45 @@
 # Onboard architecture
 
-```
- Senses ──percepts──▶ ┌───────────┐ ──targets──▶ Output (face, voice, haptics, sounds)
- (hearing, motion,    │ Executive │ ◀─feedback──
-  vision, touch,      │  (actor)  │ ──skill calls──▶ Skills ──▶ Output
-  system)             └───────────┘
-                         │     ▲
-                compose  │     │ ThoughtResult
-                         ▼     │
-                    Cognition ─▶ Inference ─▶ OpenRouter (OpenAI-compatible)
+The app is a face-only scaffold. `YobotApplication` constructs `Brain`, and
+`MainActivity` renders `Brain.face.state` with `FaceRenderer`.
 
- Every event and effect ──▶ Telemetry ──▶ Logcat, JSONL files, TCP to the Mac
+```text
+YobotApplication → Brain.face → MainActivity → static neutral FaceRenderer
+                   Brain.inference → unconfigured backend (manual calls only)
 ```
 
-- **Executive** — the only owner of `RobotState`. One coroutine, one mailbox, never blocks.
-  Policy is a pure `step(state, event, now) -> (state, effects)` function; a thin runtime
-  carries out the effects.
-- **Senses** — each runs on its own thread or callback loop and only posts percepts.
-- **Output** — expression and actuation behind small contracts; calls return immediately.
-  Locomotion will be another output.
-- **Cognition** — pure translation between state and the model: builds the prompt from
-  character, memory, skill catalogue and a situation snapshot; parses replies leniently.
-- **Inference** — one request in flight; results carry a request id and stale ones are
-  dropped. A single backend behind an interface, with a manager as the seam for routing.
-- **Skills** — bounded, validated actions the model may request. Speech and expression
-  are reply fields, not skills.
-- **Telemetry** — non-blocking structured events; each sink is isolated from the others.
+## Code layout
+
+`:app` contains seven Kotlin files: the application, `Brain`, activity,
+`ComposeFace`, and three face drawing files. There are no placeholder Android
+sensor, voice, sound, or vibration classes. `Brain` constructs only the face and
+an unconfigured inference entry point.
+
+`:core` keeps one contract file per subsystem, except outputs, which separate
+the active face contract from future voice/sound/haptic contracts:
+
+| File | Purpose |
+| --- | --- |
+| `output/Face.kt` | Face interface and the single neutral expression/state |
+| `output/Output.kt` | Future voice, sound, haptic, and combined output contracts |
+| `senses/Sense.kt` | Perception lifecycle and hearing-control interfaces |
+| `events/Events.kt` | Typed events for future sensing, commands, and feedback |
+| `state/RobotState.kt` | Minimal face state and future thought-trigger types |
+| `executive/Executive.kt` | Executive and pure policy interfaces, result/effect contracts |
+| `cognition/Cognition.kt` | Prompt/reply translation interface and intent type |
+| `inference/Inference.kt` | Request/response types, provider interface, explicit entry point |
+| `skills/SkillRegistry.kt` | Skill definition, call, and registry contracts |
+| `telemetry/Telemetry.kt` | Logging, event, and sink contracts |
+
+Only face rendering and explicit inference forwarding have implementations.
+The default inference backend reports that no provider is connected. All other
+subsystems are contracts, with no no-op instances, empty registries, or startup
+wiring. Add concrete adapters when implementing their features.
+
+There are no sensors, gestures, runtime permission prompts, memory, personalities,
+background workers, heartbeat timers, frame animation loops, telemetry sinks,
+provider credentials, camera dependencies, or HTTP client dependencies.
+
+When implementing the executive, keep policy pure, state ownership sequential,
+and hardware/network work outside its event loop. Locomotion remains a future
+output with local safety handled by the body controller.

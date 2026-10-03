@@ -1,42 +1,38 @@
 # Yobot onboard app
 
-The Android app that runs on the Pixel 8 as Yobot's brain, senses and face.
-How it is put together: [ARCHITECTURE.md](ARCHITECTURE.md).
+A minimal native Android scaffold for Yobot on the Pixel 8. The app currently
+renders one static neutral face, full-screen in portrait, and keeps the screen on.
+There is no blinking, gaze animation, touch handling, sensing, speech, vibration,
+memory, autonomous behavior, or model connection.
 
 ## Modules
 
-- `:core` — pure Kotlin/JVM: executive, cognition, inference, skills, telemetry and all contracts.
-- `:app` — Android: senses, outputs, face renderer, composition root.
+- `:core` — compact Kotlin/JVM contracts for events, state, executive, cognition,
+  inference, skills, outputs, senses, and telemetry.
+- `:app` — the face renderer and composition root. No placeholder Android adapters.
+
+[ARCHITECTURE.md](ARCHITECTURE.md) describes the extension points.
 
 ## Build and run
 
 ```sh
-./gradlew :core:test           # JVM tests for all logic
-./gradlew :app:installDebug    # build and install on the connected phone
+./gradlew :core:test
+./gradlew :app:assembleDebug
+./gradlew :app:installDebug
 ```
 
-## Configuration
+The last command installs on a connected phone. Launch Yobot to display the face.
+No runtime permissions or service credentials are needed. `local.properties` may
+still specify `sdk.dir`; previous `yobot.*` provider/telemetry keys are no longer read
+or compiled into the app.
 
-Optional keys in `local.properties` (gitignored), compiled into `BuildConfig`.
-The app builds without any of them.
+## Next iteration: connect a model explicitly
 
-| Key | Default | Purpose |
-| --- | --- | --- |
-| `yobot.openrouter.apiKey` | empty | OpenRouter API key; without it every thought fails and the face looks confused. |
-| `yobot.model` | `anthropic/claude-haiku-4.5` | Model id sent to OpenRouter. |
-| `yobot.telemetry.host` | empty | Mac IP for the TCP telemetry stream; empty disables it. |
-| `yobot.telemetry.port` | `5555` | TCP telemetry port. |
+1. Implement `InferenceBackend` for the chosen provider.
+2. Inject it into `Inference` in `Brain`.
+3. Add an explicit manual request entry point and verify a request/response round trip.
+4. Add cognition, sensing, or output behavior only when needed.
 
-## Telemetry
-
-Every executive event and effect, inference request/response and log line is one
-JSON object per line.
-
-```sh
-nc -lk 5555                    # on the Mac: live stream (set yobot.telemetry.host to the Mac's IP)
-adb logcat -s yobot            # same events, one compact line each
-adb pull /sdcard/Android/data/com.vadymsidorov.yobot/files/telemetry   # rotated JSONL files
-```
-
-The phone reconnects to the listener on its own; events produced while disconnected
-are dropped and reported as `telemetry/dropped` counts.
+Until then, a direct inference call fails with “No inference provider is connected.”
+No requests run on launch or on a timer. Other subsystems are interfaces only;
+add implementations and connect them in `Brain` when their features are needed.

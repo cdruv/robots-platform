@@ -8,6 +8,6 @@ class YobotApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        brain = Brain(this)
+        brain = Brain()
     }
 }

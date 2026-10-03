@@ -25,13 +25,14 @@ lifecycle control, detailed telemetry, and future hardware expansion.
 - **Sensors:** CameraX; Android sensor, speech recognition and audio APIs.
 - **Face:** Procedural 2D on Compose Canvas with AGSL shaders, behind a `Face`
   contract so another renderer (e.g. 3D) can be swapped in. No 3D commitment.
-- **Inference:** One OpenAI-compatible backend pointed at OpenRouter, behind an
-  interface and a manager that will route work types to providers or models later.
+- **Inference:** A replaceable backend interface and an explicit request entry
+  point. Provider integration is a future iteration; no backend is connected yet.
 - **Body controller:** Pico 2 W + MicroPython for servo execution and watchdogs.
   Communicate with the Android app over local Wi-Fi.
 - **Research/training:** Python, PyTorch, MuJoCo, and Stable-Baselines3.
-- **Observability:** Timestamped structured JSONL events to Logcat, files and a TCP
-  stream to the Mac; recording/replay and Rerun are bridged on the Mac, not the phone.
+- **Observability:** Eventually timestamped structured JSONL events to Logcat,
+  files, and a TCP stream to the Mac; recording/replay and Rerun belong on the Mac.
+  Currently only telemetry APIs and a sink contract remain.
 
 ### Architecture constraints
 - Separate perception, world state, personality/planning, skills, locomotion,

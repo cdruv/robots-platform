@@ -1,21 +1,54 @@
 package com.vadymsidorov.yobot.core.inference
 
-/**
- * Picks the backend and model for a request and times it. Single backend for now;
- * this is the seam for routing work types to different providers later.
- */
-class Inference(
-    private val backend: InferenceBackend,
-    private val defaultModel: String,
-    private val monoMs: () -> Long = { System.nanoTime() / 1_000_000 },
-) {
-    suspend fun complete(request: InferenceRequest): InferenceResponse {
-        val resolved = request.copy(model = request.model ?: defaultModel)
-        val start = monoMs()
-        val response = backend.complete(resolved)
-        return response.copy(latencyMs = monoMs() - start)
-    }
+import kotlinx.serialization.Serializable
 
-    val model: String get() = defaultModel
+/** Provider seam for manual requests. Nothing schedules or calls it automatically. */
+class Inference(private val backend: InferenceBackend = StubInferenceBackend) {
+    suspend fun complete(request: InferenceRequest): InferenceResponse = backend.complete(request)
+
     val backendName: String get() = backend.name
 }
+
+/** Implement this interface to connect a model provider in a later iteration. */
+interface InferenceBackend {
+    val name: String
+    suspend fun complete(request: InferenceRequest): InferenceResponse
+}
+
+object StubInferenceBackend : InferenceBackend {
+    override val name = "unconfigured"
+
+    override suspend fun complete(request: InferenceRequest): InferenceResponse =
+        throw InferenceException("No inference provider is connected")
+}
+
+class InferenceException(message: String, val status: Int? = null, cause: Throwable? = null) :
+    Exception(message, cause)
+
+@Serializable
+data class ChatMessage(val role: String, val content: String) {
+    companion object {
+        fun system(content: String) = ChatMessage("system", content)
+        fun user(content: String) = ChatMessage("user", content)
+        fun assistant(content: String) = ChatMessage("assistant", content)
+    }
+}
+
+/** A future provider determines whether an explicit [model] is required. */
+@Serializable
+data class InferenceRequest(
+    val messages: List<ChatMessage>,
+    val model: String? = null,
+    val temperature: Double = 0.8,
+    val jsonMode: Boolean = false,
+)
+
+@Serializable
+data class Usage(val promptTokens: Int, val completionTokens: Int)
+
+@Serializable
+data class InferenceResponse(
+    val text: String,
+    val usage: Usage? = null,
+    val latencyMs: Long = 0,
+)

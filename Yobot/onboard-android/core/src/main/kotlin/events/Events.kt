@@ -10,7 +10,7 @@ typealias RequestId = Long
 
 /**
  * Everything the Executive reacts to. All events are serializable so the same objects
- * are telemetry payloads and, later, replay input.
+ * can become telemetry payloads and replay input in future iterations.
  */
 @Serializable
 sealed interface ExecutiveEvent
@@ -111,10 +111,6 @@ data class ThoughtResult(
         )
     }
 }
-
-@Serializable
-@SerialName("Heartbeat")
-data class Heartbeat(val nowMs: Long) : ExecutiveEvent
 
 /** Direct instructions, for tests and the future debug overlay. */
 @Serializable
