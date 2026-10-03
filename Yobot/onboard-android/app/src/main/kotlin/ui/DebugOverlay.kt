@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -20,10 +21,13 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
@@ -31,6 +35,8 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vadymsidorov.yobot.Brain
 import com.vadymsidorov.yobot.core.telemetry.TelemetryEvent
+import com.vadymsidorov.yobot.core.telemetry.presentation
+import com.vadymsidorov.yobot.core.telemetry.toJsonLine
 import com.vadymsidorov.yobot.senses.HearingState
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -67,6 +73,10 @@ fun DebugOverlay(brain: Brain, modifier: Modifier = Modifier) {
     val hearing by brain.hearing.status.collectAsStateWithLifecycle()
     val server by brain.telemetryServer.status.collectAsStateWithLifecycle()
     val events by brain.recentEvents.events.collectAsStateWithLifecycle()
+    var showPartial by remember { mutableStateOf(false) }
+    val visibleEvents = remember(events, showPartial) {
+        events.asReversed().filter { showPartial || !it.presentation().partial }
+    }
     val time = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
 
     Column(
@@ -123,21 +133,43 @@ fun DebugOverlay(brain: Brain, modifier: Modifier = Modifier) {
             style = Mono.copy(color = if (server.error != null) Red else Dim),
         )
         Spacer(Modifier.height(8.dp))
+        BasicText(
+            if (showPartial) "[hide partials] · tap event for details" else "[show partials] · tap event for details",
+            style = Mono.copy(color = Dim),
+            modifier = Modifier.padding(bottom = 6.dp).clickable { showPartial = !showPartial },
+        )
         LazyColumn(Modifier.weight(1f), reverseLayout = true) {
-            items(events.asReversed(), key = { it.seq }) { event ->
-                BasicText(event.line(time), style = Mono.copy(color = event.color()), maxLines = 2)
-            }
+            items(visibleEvents, key = { it.seq }) { event -> EventRow(event, time) }
         }
     }
 }
 
-private fun TelemetryEvent.line(time: SimpleDateFormat): String =
-    "${time.format(Date(tsWallMs))} $source/$kind ${payload.toString().take(400)}"
-
-private fun TelemetryEvent.color(): Color = when {
-    kind == "log.error" -> Red
-    kind == "log.warn" || kind == "dropped" -> Amber
-    kind == "HeardUtterance" && !payload.toString().contains("\"isFinal\":false") -> Cyan
-    kind == "HeardUtterance" -> Dim
-    else -> Bright
+@Composable
+private fun EventRow(event: TelemetryEvent, time: SimpleDateFormat) {
+    var expanded by remember(event.seq) { mutableStateOf(false) }
+    val summary = remember(event) { event.presentation() }
+    val color = when (summary.label) {
+        "ERROR" -> Red
+        "WARN" -> Amber
+        "HEARD" -> Cyan
+        "PARTIAL" -> Dim
+        else -> Bright
+    }
+    Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 5.dp)) {
+        BasicText(
+            "${time.format(Date(event.tsWallMs))}  ${summary.label}  ${event.source}  ${if (expanded) "−" else "+"}",
+            style = Mono.copy(color = color),
+        )
+        BasicText(
+            summary.message,
+            style = Mono.copy(color = color, fontSize = 13.sp, lineHeight = 17.sp),
+            maxLines = if (expanded) Int.MAX_VALUE else 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (expanded) {
+            SelectionContainer {
+                BasicText(event.toJsonLine(), style = Mono.copy(color = Dim))
+            }
+        }
+    }
 }

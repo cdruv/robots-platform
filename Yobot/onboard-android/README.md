@@ -35,7 +35,9 @@ Tap the faint round button in the bottom-right corner to show or hide the overla
 - the live partial transcript, or the last final one;
 - the telemetry stream: port, number of connected clients, the phone's IP addresses, and
   dropped-event count;
-- the most recent telemetry events, newest at the bottom.
+- readable event summaries, newest at the bottom. Tap an event to expand its full,
+  selectable JSON record. Partial transcripts are hidden by default; use `[show partials]`
+  to include them (the live transcript remains visible above).
 
 ## Streaming telemetry to the Mac
 
@@ -43,7 +45,7 @@ The phone serves JSON lines on TCP port 7777. Over USB:
 
 ```sh
 ./tools/telemetry-tail.sh              # raw JSON lines
-./tools/telemetry-tail.sh --pretty     # time source/kind payload, via jq
+./tools/telemetry-tail.sh --pretty     # time, severity/event label, source, and summary, via jq
 ./tools/telemetry-tail.sh | tee run.jsonl
 ```
 

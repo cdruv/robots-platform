@@ -36,7 +36,7 @@ fi
 if [ "$PRETTY" = 1 ]; then
   command -v jq >/dev/null || { echo "jq is required for --pretty (brew install jq)" >&2; exit 1; }
   filter() {
-    jq --unbuffered -r '"\(.tsWallMs / 1000 | strflocaltime("%H:%M:%S")) \(.source)/\(.kind) \(.payload | tostring)"'
+    jq --unbuffered -r -f "$(dirname "${BASH_SOURCE[0]}")/telemetry-pretty.jq"
   }
 else
   filter() { cat; }
