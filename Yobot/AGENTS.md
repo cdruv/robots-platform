@@ -23,6 +23,7 @@ lifecycle control, detailed telemetry, and future hardware expansion.
   `:core` module for all logic and contracts, and an Android `:app` module for
   platform implementations.
 - **Sensors:** CameraX; Android sensor, speech recognition and audio APIs.
+  Hearing is live: continuous on-device `SpeechRecognizer` transcription.
 - **Face:** Procedural 2D on Compose Canvas with AGSL shaders, behind a `Face`
   contract so another renderer (e.g. 3D) can be swapped in. No 3D commitment.
 - **Inference:** A replaceable backend interface and an explicit request entry
@@ -30,9 +31,9 @@ lifecycle control, detailed telemetry, and future hardware expansion.
 - **Body controller:** Pico 2 W + MicroPython for servo execution and watchdogs.
   Communicate with the Android app over local Wi-Fi.
 - **Research/training:** Python, PyTorch, MuJoCo, and Stable-Baselines3.
-- **Observability:** Eventually timestamped structured JSONL events to Logcat,
-  files, and a TCP stream to the Mac; recording/replay and Rerun belong on the Mac.
-  Currently only telemetry APIs and a sink contract remain.
+- **Observability:** Timestamped structured JSONL events to Logcat, a TCP stream
+  served by the phone (`tools/telemetry-tail.sh` on the Mac), and an on-screen debug
+  overlay. File sinks, recording/replay, and Rerun belong to later iterations on the Mac.
 
 ### Architecture constraints
 - Separate perception, world state, personality/planning, skills, locomotion,

@@ -2,6 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Hearing: on-device speech recognition. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Telemetry: the app serves JSON lines over TCP to the workstation. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Lets SpeechRecognizer resolve the recognition service on API 30+. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
+
     <application
         android:name=".YobotApplication"
         android:allowBackup="true"
