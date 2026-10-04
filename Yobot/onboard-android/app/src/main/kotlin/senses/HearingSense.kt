@@ -72,19 +72,23 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
         r.startListening(recognizerIntent())
     }
 
+    private fun onMain(block: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post { block() }
+    }
+
     override fun start(post: (Percept) -> Unit) {
-        main.post {
-            if (running) return@post
+        onMain {
+            if (running) return@onMain
             if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 log.warn("hearing not started: RECORD_AUDIO not granted")
                 current.update { it.copy(state = HearingState.NoPermission) }
-                return@post
+                return@onMain
             }
             this.post = post
             running = true
             if (!SpeechRecognizer.isOnDeviceRecognitionAvailable(context)) {
                 fail("ON_DEVICE_UNAVAILABLE")
-                return@post
+                return@onMain
             }
             val r = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             r.setRecognitionListener(Listener(r))
@@ -96,11 +100,11 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
     }
 
     override fun stop() {
-        main.post {
+        onMain {
             running = false
             listening = false
             ready = false
-            main.removeCallbacks(listen)
+            main.removeCallbacksAndMessages(null)
             recognizer?.destroy()
             recognizer = null
             post = null
@@ -110,8 +114,8 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
     }
 
     override fun setEnabled(enabled: Boolean) {
-        main.post {
-            if (this.enabled == enabled) return@post
+        onMain {
+            if (this.enabled == enabled) return@onMain
             this.enabled = enabled
             log.info(if (enabled) "hearing unmuted" else "hearing muted")
             current.update { it.copy(muted = !enabled) }

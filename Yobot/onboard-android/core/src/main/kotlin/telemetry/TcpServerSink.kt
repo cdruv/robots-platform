@@ -59,7 +59,9 @@ class TcpServerSink(
         }
     }
 
+    @Synchronized
     override fun write(batch: List<TelemetryEvent>) {
+        if (closed) return
         start()
         if (batch.isEmpty()) return
         val lines = batch.map { it.toJsonLine() }
@@ -72,6 +74,7 @@ class TcpServerSink(
 
     override fun takeDropped(): Long = dropped.getAndSet(0)
 
+    @Synchronized
     override fun close() {
         closed = true
         runCatching { server?.close() }
@@ -85,11 +88,17 @@ class TcpServerSink(
             } catch (_: IOException) {
                 break
             }
-            val client = Client(connection)
-            client.offer(synchronized(replay) { replay.toList() })
-            clients += client
-            client.start()
-            publish()
+            synchronized(this) {
+                if (closed) {
+                    connection.close()
+                    return
+                }
+                val client = Client(connection)
+                client.offer(synchronized(replay) { replay.toList() })
+                clients += client
+                client.start()
+                publish()
+            }
         }
     }
 

@@ -6,7 +6,6 @@ import com.vadymsidorov.yobot.core.inference.Inference
 import com.vadymsidorov.yobot.core.reflex.MotionReflex
 import com.vadymsidorov.yobot.core.senses.Sense
 import com.vadymsidorov.yobot.core.telemetry.DefaultTelemetry
-import com.vadymsidorov.yobot.core.telemetry.Logger
 import com.vadymsidorov.yobot.core.telemetry.RecentEventsSink
 import com.vadymsidorov.yobot.core.telemetry.TcpServerSink
 import com.vadymsidorov.yobot.output.ComposeFace
@@ -17,68 +16,74 @@ import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
-/**
- * Composition root. Telemetry lives as long as the process; senses run only while the
- * activity is started (Android blocks microphone access for background apps anyway).
- * There is no executive yet, so percepts are only telemetered. Reflexes, the sense-to-output
- * paths that bypass the executive by design, are all connected in the "Reflexes" block below.
- */
+/** Owns a foreground session. Construction alone starts no work. */
 class Brain(context: Context) {
     private val app = context.applicationContext
-
-    private val scope = CoroutineScope(
-        SupervisorJob() + Dispatchers.Default +
-            CoroutineExceptionHandler { _, e -> log.error("uncaught coroutine failure", e) },
-    )
-
     val recentEvents = RecentEventsSink()
-    val telemetryServer = TcpServerSink()
-    val telemetry: DefaultTelemetry = DefaultTelemetry(listOf(LogcatSink(), telemetryServer, recentEvents), scope)
-    private val log: Logger = telemetry.logger("brain")
-
     val face = ComposeFace()
     val inference = Inference()
-    val hearing = HearingSense(app, telemetry.logger("hearing"))
-    val imu = ImuSense(app, telemetry.logger("imu"))
-    private val senses: List<Sense> = listOf(hearing, imu)
+    private var session = Session()
+    private var running = false
+    private var used = false
 
-    // ── Reflexes ────────────────────────────────────────────────────────────────────────
-    // The ONLY sense-to-output connections that do not go through the executive. Each one
-    // is listed here and in the "reflexes" field of the boot event. Rules: core/reflex/MotionReflex.kt.
+    val telemetry get() = session.telemetry
+    val telemetryServer get() = session.server
+    val hearing get() = session.hearing
+    val imu get() = session.imu
 
-    /** imu -> face: every IMU sample, read by the face renderer each frame to move the liquid and the features. */
-    val faceMotionReflex: MotionReflex = imu
-    // ────────────────────────────────────────────────────────────────────────────────────
+    /** The sole reflex: IMU -> face, bypassing the executive. */
+    val faceMotionReflex: MotionReflex get() = imu
 
-    init {
+    // Called only by the activity's foreground gate on the main thread.
+    fun resume() {
+        if (running) return
+        if (used) {
+            val muted = hearing.status.value.muted
+            session = Session()
+            hearing.setEnabled(!muted)
+        }
+        used = true
+        running = true
         telemetryServer.start()
         telemetry.start()
-        telemetry.emit("brain", "boot", buildJsonObject {
+        telemetry.emit("brain", "resume", buildJsonObject {
             put("inference", inference.backendName)
             put("reflexes", "imu->face")
             put("telemetryPort", telemetryServer.status.value.port)
-            put("addresses", telemetryServer.status.value.addresses.joinToString(","))
         })
-    }
-
-    /** Idempotent; each sense ignores a repeated start. Hearing stays off until RECORD_AUDIO is granted. */
-    fun startSenses() {
-        senses.forEach { sense ->
-            runCatching { sense.start(::onPercept) }.onFailure { log.error("${sense.name} failed to start", it) }
+        session.senses.forEach { sense ->
+            runCatching { sense.start(session::onPercept) }
+                .onFailure { telemetry.logger("brain").error("${sense.name} failed to start", it) }
         }
     }
 
-    fun stopSenses() {
-        senses.forEach { sense ->
-            runCatching { sense.stop() }.onFailure { log.error("${sense.name} failed to stop", it) }
+    fun pause() {
+        if (!running) return
+        running = false
+        session.senses.forEach { sense ->
+            runCatching { sense.stop() }
+                .onFailure { telemetry.logger("brain").error("${sense.name} failed to stop", it) }
         }
+        // Close sockets immediately and cancel all workers/timers, without draining old work.
+        telemetryServer.close()
+        session.scope.cancel()
     }
 
-    private fun onPercept(percept: Percept) {
-        // Keep partials in the bounded telemetry history; the debug view filters them by default.
-        telemetry.emit("sense", percept::class.simpleName ?: "Percept", Percept.serializer(), percept)
+    private inner class Session {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default +
+            CoroutineExceptionHandler { _, e -> android.util.Log.e("Yobot", "session failure", e) })
+        val server = TcpServerSink()
+        val telemetry = DefaultTelemetry(listOf(LogcatSink(), server, recentEvents), scope)
+        val hearing = HearingSense(app, telemetry.logger("hearing"))
+        val imu = ImuSense(app, telemetry.logger("imu"))
+        val senses: List<Sense> = listOf(hearing, imu)
+
+        fun onPercept(percept: Percept) {
+            telemetry.emit("sense", percept::class.simpleName ?: "Percept", Percept.serializer(), percept)
+        }
     }
 }

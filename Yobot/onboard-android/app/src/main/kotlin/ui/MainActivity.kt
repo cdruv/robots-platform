@@ -1,11 +1,19 @@
 package com.vadymsidorov.yobot.ui
 
+import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.hardware.display.DisplayManager
+import android.os.PowerManager
+import android.view.Display
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
+import androidx.compose.ui.platform.ComposeView
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -34,14 +42,33 @@ private val OverlayFade = tween<Float>(240)
 
 /**
  * Full-screen face with a small corner button that toggles the debug overlay. Senses run
- * while the activity is started; the microphone permission is requested on first start.
+ * only while resumed, focused, unlocked, and on an active display.
  */
 class MainActivity : ComponentActivity() {
     private val brain get() = (application as YobotApplication).brain
 
+    private var resumed = false
+    private var focused = false
+    private var robotActive = false
+    private lateinit var faceView: ComposeView
+    private val displayManager by lazy { getSystemService(DisplayManager::class.java) }
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) = updateForeground()
+        override fun onDisplayRemoved(displayId: Int) = updateForeground()
+        override fun onDisplayChanged(displayId: Int) = updateForeground()
+    }
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == Intent.ACTION_SCREEN_OFF) setRobotActive(false)
+            else updateForeground()
+        }
+    }
+
     private val requestMicrophone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) brain.startSenses()
-        else brain.telemetry.logger("activity").warn("RECORD_AUDIO denied; hearing stays off")
+        if (granted) {
+            setRobotActive(false)
+            updateForeground()
+        } else brain.telemetry.logger("activity").warn("RECORD_AUDIO denied; hearing stays off")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -52,11 +79,22 @@ class MainActivity : ComponentActivity() {
             hide(WindowInsetsCompat.Type.systemBars())
             systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         }
+        registerReceiver(screenReceiver, IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_USER_PRESENT)
+        }, RECEIVER_NOT_EXPORTED)
+        displayManager.registerDisplayListener(displayListener, null)
+        faceView = ComposeView(this)
+        setContentView(faceView)
+    }
+
+    private fun showFace() {
         val brain = brain
-        setContent {
-            val target by brain.face.state.collectAsStateWithLifecycle()
+        faceView.setContent {
             var showDebug by rememberSaveable { mutableStateOf(false) }
             Box(Modifier.fillMaxSize().background(FaceBackground)) {
+                val target by brain.face.state.collectAsStateWithLifecycle()
                 FaceRenderer(target, motionReflex = brain.faceMotionReflex, overlayVisible = showDebug)
                 AnimatedVisibility(showDebug, enter = fadeIn(OverlayFade), exit = fadeOut(OverlayFade)) {
                     DebugOverlay(brain, window, Modifier.fillMaxSize())
@@ -72,15 +110,61 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // Senses that need no permission start now; hearing joins once the microphone is granted.
-        brain.startSenses()
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestMicrophone.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        resumed = true
+        focused = window.decorView.hasWindowFocus()
+        updateForeground()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        focused = hasFocus
+        updateForeground()
+    }
+
+    override fun onPause() {
+        resumed = false
+        setRobotActive(false)
+        super.onPause()
+    }
+
     override fun onStop() {
-        brain.stopSenses()
+        setRobotActive(false)
         super.onStop()
+    }
+
+    override fun onDestroy() {
+        setRobotActive(false)
+        displayManager.unregisterDisplayListener(displayListener)
+        unregisterReceiver(screenReceiver)
+        super.onDestroy()
+    }
+
+    private fun updateForeground() {
+        setRobotActive(resumed && focused &&
+            getSystemService(PowerManager::class.java).isInteractive &&
+            !getSystemService(KeyguardManager::class.java).isKeyguardLocked &&
+            display?.state == Display.STATE_ON)
+    }
+
+    private fun setRobotActive(active: Boolean) {
+        if (active == robotActive) return
+        robotActive = active
+        if (active) {
+            brain.resume()
+            showFace()
+        } else {
+            // Dispose immediately: a state change alone may wait for a frame that never
+            // arrives with the screen off, leaving LaunchedEffect timers running.
+            faceView.setContent {}
+            faceView.disposeComposition()
+            brain.pause()
+        }
     }
 }

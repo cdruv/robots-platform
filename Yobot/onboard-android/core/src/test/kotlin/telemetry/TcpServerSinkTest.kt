@@ -49,6 +49,37 @@ class TcpServerSinkTest {
     }
 
     @Test
+    fun closingSessionDisconnectsClientsAndAllowsFreshSessionOnSamePort() {
+        val first = TcpServerSink(port = 0)
+        first.start()
+        val port = first.status.value.port!!
+        val (socket, reader) = connect(port)
+        try {
+            awaitClients(first, 1)
+            first.close()
+            assertEquals(null, reader.readLine())
+            // A late telemetry worker must not reopen the closed session.
+            first.write(listOf(event(1)))
+            val next = TcpServerSink(port = port)
+            try {
+                next.start()
+                assertEquals(null, next.status.value.error)
+                val (newSocket, newReader) = connect(port)
+                newSocket.use {
+                    awaitClients(next, 1)
+                    next.write(listOf(event(2)))
+                    assertEquals(event(2), YobotJson.decodeFromString(TelemetryEvent.serializer(), newReader.readLine()))
+                }
+            } finally {
+                next.close()
+            }
+        } finally {
+            socket.close()
+            first.close()
+        }
+    }
+
+    @Test
     fun bindFailureIsReportedNotThrown() {
         val first = TcpServerSink(port = 0)
         try {

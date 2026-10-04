@@ -7,6 +7,7 @@ Onboard app is native Android in `onboard-android/`.
 
 ## Architectural Decisions and Rules
 
+- All Android robot work must belong to a single foreground session that stops and releases resources whenever the app loses foreground focus or the display turns off, resuming only while the app is foregrounded and the display is on and unlocked.
 - One executive owns robot state and processes events sequentially on a single
   thread. Edge loops pass events in and targets out; the executive never blocks.
 - A reflex is a named high-rate path from a sense straight to an output,

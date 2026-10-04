@@ -82,7 +82,7 @@ class ImuSense(context: Context, private val log: Logger) : Sense, MotionReflex 
         private var rotationY = 0f
         private var rotationZ = 0f
 
-        override fun onSensorChanged(event: SensorEvent) {
+        override fun onSensorChanged(event: SensorEvent): Unit = synchronized(this@ImuSense) {
             if (this !== listener) return
             val v = event.values
             when (event.sensor.type) {
