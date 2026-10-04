@@ -1,0 +1,539 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 110;
+	objects = {
+
+/* Begin PBXContainerItemProxy section */
+		756FD4493073071300B6C0A9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 756FD4313073071200B6C0A9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 756FD4383073071200B6C0A9;
+			remoteInfo = "Robot Relay";
+		};
+		756FD4533073071300B6C0A9 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 756FD4313073071200B6C0A9 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 756FD4383073071200B6C0A9;
+			remoteInfo = "Robot Relay";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		756FD4393073071200B6C0A9 /* Robot Relay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Robot Relay.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		756FD4483073071300B6C0A9 /* Robot RelayTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Robot RelayTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		756FD4523073071300B6C0A9 /* Robot RelayUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Robot RelayUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		756FD43B3073071200B6C0A9 /* Robot Relay */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Robot Relay";
+			sourceTree = "<group>";
+		};
+		756FD44B3073071300B6C0A9 /* Robot RelayTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Robot RelayTests";
+			sourceTree = "<group>";
+		};
+		756FD4553073071300B6C0A9 /* Robot RelayUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "Robot RelayUITests";
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		756FD4363073071200B6C0A9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		756FD4453073071300B6C0A9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+		756FD44F3073071300B6C0A9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			files = (
+			);
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		756FD4303073071200B6C0A9 = {
+			isa = PBXGroup;
+			children = (
+				756FD43B3073071200B6C0A9 /* Robot Relay */,
+				756FD44B3073071300B6C0A9 /* Robot RelayTests */,
+				756FD4553073071300B6C0A9 /* Robot RelayUITests */,
+				756FD43A3073071200B6C0A9 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		756FD43A3073071200B6C0A9 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				756FD4393073071200B6C0A9 /* Robot Relay.app */,
+				756FD4483073071300B6C0A9 /* Robot RelayTests.xctest */,
+				756FD4523073071300B6C0A9 /* Robot RelayUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		756FD4383073071200B6C0A9 /* Robot Relay */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 756FD45A3073071300B6C0A9 /* Build configuration list for PBXNativeTarget "Robot Relay" */;
+			buildPhases = (
+				756FD4353073071200B6C0A9 /* Sources */,
+				756FD4363073071200B6C0A9 /* Frameworks */,
+				756FD4373073071200B6C0A9 /* Resources */,
+			);
+			buildRules = (
+			);
+			fileSystemSynchronizedGroups = (
+				756FD43B3073071200B6C0A9 /* Robot Relay */,
+			);
+			name = "Robot Relay";
+			productName = "Robot Relay";
+			productReference = 756FD4393073071200B6C0A9 /* Robot Relay.app */;
+			productType = "com.apple.product-type.application";
+		};
+		756FD4473073071300B6C0A9 /* Robot RelayTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 756FD45D3073071300B6C0A9 /* Build configuration list for PBXNativeTarget "Robot RelayTests" */;
+			buildPhases = (
+				756FD4443073071300B6C0A9 /* Sources */,
+				756FD4453073071300B6C0A9 /* Frameworks */,
+				756FD4463073071300B6C0A9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				756FD44A3073071300B6C0A9 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				756FD44B3073071300B6C0A9 /* Robot RelayTests */,
+			);
+			name = "Robot RelayTests";
+			productName = "Robot RelayTests";
+			productReference = 756FD4483073071300B6C0A9 /* Robot RelayTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		756FD4513073071300B6C0A9 /* Robot RelayUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 756FD4603073071300B6C0A9 /* Build configuration list for PBXNativeTarget "Robot RelayUITests" */;
+			buildPhases = (
+				756FD44E3073071300B6C0A9 /* Sources */,
+				756FD44F3073071300B6C0A9 /* Frameworks */,
+				756FD4503073071300B6C0A9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				756FD4543073071300B6C0A9 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				756FD4553073071300B6C0A9 /* Robot RelayUITests */,
+			);
+			name = "Robot RelayUITests";
+			productName = "Robot RelayUITests";
+			productReference = 756FD4523073071300B6C0A9 /* Robot RelayUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		756FD4313073071200B6C0A9 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2700;
+				LastUpgradeCheck = 2700;
+				TargetAttributes = {
+					756FD4383073071200B6C0A9 = {
+						CreatedOnToolsVersion = 27.0;
+					};
+					756FD4473073071300B6C0A9 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 756FD4383073071200B6C0A9;
+					};
+					756FD4513073071300B6C0A9 = {
+						CreatedOnToolsVersion = 27.0;
+						TestTargetID = 756FD4383073071200B6C0A9;
+					};
+				};
+			};
+			buildConfigurationList = 756FD4343073071200B6C0A9 /* Build configuration list for PBXProject "Robot Relay" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 756FD4303073071200B6C0A9;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 756FD43A3073071200B6C0A9 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				756FD4383073071200B6C0A9 /* Robot Relay */,
+				756FD4473073071300B6C0A9 /* Robot RelayTests */,
+				756FD4513073071300B6C0A9 /* Robot RelayUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		756FD4373073071200B6C0A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		756FD4463073071300B6C0A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+		756FD4503073071300B6C0A9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			files = (
+			);
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		756FD4353073071200B6C0A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		756FD4443073071300B6C0A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+		756FD44E3073071300B6C0A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			files = (
+			);
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		756FD44A3073071300B6C0A9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 756FD4383073071200B6C0A9 /* Robot Relay */;
+			targetProxy = 756FD4493073071300B6C0A9 /* PBXContainerItemProxy */;
+		};
+		756FD4543073071300B6C0A9 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 756FD4383073071200B6C0A9 /* Robot Relay */;
+			targetProxy = 756FD4533073071300B6C0A9 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		756FD4583073071300B6C0A9 /* Debug configuration for PBXProject "Robot Relay" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.6;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		756FD4593073071300B6C0A9 /* Release configuration for PBXProject "Robot Relay" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.6;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		756FD45B3073071300B6C0A9 /* Debug configuration for PBXNativeTarget "Robot Relay" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "vadymsidorov.Robot-Relay";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		756FD45C3073071300B6C0A9 /* Release configuration for PBXNativeTarget "Robot Relay" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SELECTED_FILES = readonly;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "vadymsidorov.Robot-Relay";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		756FD45E3073071300B6C0A9 /* Debug configuration for PBXNativeTarget "Robot RelayTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "vadymsidorov.Robot-RelayTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Robot Relay.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Robot Relay";
+			};
+			name = Debug;
+		};
+		756FD45F3073071300B6C0A9 /* Release configuration for PBXNativeTarget "Robot RelayTests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.6;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "vadymsidorov.Robot-RelayTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Robot Relay.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Robot Relay";
+			};
+			name = Release;
+		};
+		756FD4613073071300B6C0A9 /* Debug configuration for PBXNativeTarget "Robot RelayUITests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "vadymsidorov.Robot-RelayUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = "Robot Relay";
+			};
+			name = Debug;
+		};
+		756FD4623073071300B6C0A9 /* Release configuration for PBXNativeTarget "Robot RelayUITests" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "vadymsidorov.Robot-RelayUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = "Robot Relay";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		756FD4343073071200B6C0A9 /* Build configuration list for PBXProject "Robot Relay" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				756FD4583073071300B6C0A9 /* Debug configuration for PBXProject "Robot Relay" */,
+				756FD4593073071300B6C0A9 /* Release configuration for PBXProject "Robot Relay" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		756FD45A3073071300B6C0A9 /* Build configuration list for PBXNativeTarget "Robot Relay" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				756FD45B3073071300B6C0A9 /* Debug configuration for PBXNativeTarget "Robot Relay" */,
+				756FD45C3073071300B6C0A9 /* Release configuration for PBXNativeTarget "Robot Relay" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		756FD45D3073071300B6C0A9 /* Build configuration list for PBXNativeTarget "Robot RelayTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				756FD45E3073071300B6C0A9 /* Debug configuration for PBXNativeTarget "Robot RelayTests" */,
+				756FD45F3073071300B6C0A9 /* Release configuration for PBXNativeTarget "Robot RelayTests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		756FD4603073071300B6C0A9 /* Build configuration list for PBXNativeTarget "Robot RelayUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				756FD4613073071300B6C0A9 /* Debug configuration for PBXNativeTarget "Robot RelayUITests" */,
+				756FD4623073071300B6C0A9 /* Release configuration for PBXNativeTarget "Robot RelayUITests" */,
+			);
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 756FD4313073071200B6C0A9 /* Project object */;
+	validationLevel = 1;
+}
