@@ -3,49 +3,69 @@ import Observation
 
 @Observable
 final class FirmwareStore {
-    /// nil until the service reports one.
-    private(set) var file: FirmwareFile?
-    /// 0…1 while an upload is running.
-    private(set) var uploadProgress: Double?
+    private(set) var state = FirmwareState()
 
-    var armMode: ArmMode = .center
-    var repeatEveryBoot = false
-    /// nil: unknown. Set only after arming from here.
-    private(set) var isArmed: Bool?
+    /// The power-on menu's choice: a mode, or "" for nothing. nil follows the board.
+    var bootSelection: String?
 
     /// The offsets being edited, starting from the stored ones (or neutral when unknown).
-    var offsets: LegOffsets
-    /// What the device holds; nil when unknown.
-    private(set) var storedOffsets: LegOffsets?
+    var offsets = LegOffsets(left: 0, right: 0)
 
     private(set) var consoleLines: [ConsoleLine] = []
 
-    /// nil when no Pico is reachable; actions are disabled then.
-    let deviceInfo: FirmwareDeviceInfo?
-
     private let service: any FirmwareService
-    private var task: Task<Void, Never>?
+    private var tasks: [Task<Void, Never>] = []
 
     init(service: any FirmwareService) {
         self.service = service
-        deviceInfo = service.deviceInfo
-        file = service.file
-        storedOffsets = service.storedOffsets
-        offsets = service.storedOffsets ?? LegOffsets(left: 0, right: 0)
     }
 
     func start() {
-        guard task == nil else { return }
-        task = Task { [weak self, service] in
-            for await line in service.console() {
-                self?.append(line)
+        guard tasks.isEmpty else { return }
+        tasks.append(Task { [weak self, service] in
+            for await state in service.state() {
+                self?.apply(state)
             }
+        })
+        tasks.append(Task { [weak self, service] in
+            for await line in service.console() {
+                self?.consoleLines.append(line)
+            }
+        })
+    }
+
+    var hasDevice: Bool { state.hasDevice }
+
+    var storedOffsets: LegOffsets? { state.storedOffsets }
+
+    /// Calibration needs the board to report stored offsets, which it doesn't yet.
+    var canCalibrate: Bool { hasDevice && storedOffsets != nil && !state.isBusy }
+
+    var canUpload: Bool { hasDevice && !state.isBusy && !state.changedFiles.isEmpty }
+
+    /// What `mode.txt` holds now: a mode, or "" for none. nil until read.
+    var currentBoot: String? {
+        switch state.bootMode {
+        case .armed(let mode): mode
+        case .idle: ""
+        case nil: nil
         }
     }
 
-    var hasDevice: Bool { deviceInfo != nil }
+    /// The menu: nothing, then the firmware's modes in its order.
+    var bootOptions: [(value: String, label: String)] {
+        [("", "nothing")] + state.modes.map { ($0, PicoArm.menuLabel($0)) }
+    }
 
-    var isUploading: Bool { uploadProgress != nil }
+    var selectedBoot: String {
+        if let bootSelection, bootOptions.contains(where: { $0.value == bootSelection }) { return bootSelection }
+        if let currentBoot, bootOptions.contains(where: { $0.value == currentBoot }) { return currentBoot }
+        return state.modes.first ?? ""
+    }
+
+    var canApplyBoot: Bool {
+        hasDevice && !state.isBusy && !state.modes.isEmpty && currentBoot != nil && selectedBoot != currentBoot
+    }
 
     var unsavedOffsetCount: Int {
         LegSide.allCases.count { isUnsaved($0) }
@@ -56,35 +76,32 @@ final class FirmwareStore {
         return offsets[side] != storedOffsets[side]
     }
 
+    func refreshLocal() {
+        Task { await service.refreshLocal() }
+    }
+
+    func chooseFolder(_ folder: URL) {
+        Task { await service.setFolder(folder) }
+    }
+
+    func useDefaultFolder() {
+        Task { await service.setFolder(nil) }
+    }
+
     func upload() {
-        guard !isUploading, let file else { return }
-        uploadProgress = 0
-        Task {
-            for await progress in service.upload(file) {
-                uploadProgress = progress
-            }
-            self.file?.device = file.local
-            uploadProgress = nil
-        }
+        Task { await service.upload() }
     }
 
-    func backUpDeviceCopy() {
-        Task { await service.backUpDeviceCopy() }
-    }
-
-    func arm() {
-        Task {
-            await service.arm(mode: armMode, repeatEveryBoot: repeatEveryBoot)
-            isArmed = true
-        }
+    func applyBoot() {
+        guard canApplyBoot else { return }
+        let mode = selectedBoot
+        bootSelection = nil
+        Task { await service.setBootMode(mode.isEmpty ? nil : mode) }
     }
 
     func writeOffsets() {
         let offsets = offsets
-        Task {
-            await service.writeOffsets(offsets)
-            storedOffsets = offsets
-        }
+        Task { await service.writeOffsets(offsets) }
     }
 
     func centerLegs() {
@@ -95,15 +112,12 @@ final class FirmwareStore {
         Task { await service.sweepLegs(degrees: 10) }
     }
 
-    func openREPL() {
-        Task { await service.openREPL() }
+    func clearConsole() {
+        consoleLines.removeAll()
     }
 
-    private func append(_ line: ConsoleLine) {
-        if let index = consoleLines.lastIndex(where: { $0.id == line.id }) {
-            consoleLines[index] = line
-        } else {
-            consoleLines.append(line)
-        }
+    private func apply(_ new: FirmwareState) {
+        if state.storedOffsets == nil, let stored = new.storedOffsets { offsets = stored }
+        state = new
     }
 }

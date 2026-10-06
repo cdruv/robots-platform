@@ -21,7 +21,7 @@ final class PhoneLinkService: RobotLinkService {
         connection.onStatus = { [weak self] status in self?.apply(status) }
         connection.onActivity = { [weak self] entry in self?.record(entry) }
         runner.report = { [weak self] entry in self?.record(entry) }
-        pico.onChange = { [weak self] link in self?.apply(link) }
+        pico.observe { [weak self] link in self?.apply(link) }
         pico.start()
     }
 
@@ -37,14 +37,6 @@ final class PhoneLinkService: RobotLinkService {
 
     func disconnectPhone() async {
         connection.disconnect()
-    }
-
-    func releasePico() async {
-        await pico.disarm()
-    }
-
-    func armPico(mode: ArmMode, repeatEveryBoot: Bool) async {
-        await pico.arm(PicoMode.value(mode: mode, repeatEveryBoot: repeatEveryBoot))
     }
 
     func pairController() async {}

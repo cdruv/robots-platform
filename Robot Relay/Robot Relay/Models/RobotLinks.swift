@@ -85,26 +85,47 @@ nonisolated struct PicoLink: Equatable, Sendable {
     var port: String?
     /// nil: not read yet, or the port was busy.
     var arm: PicoArm?
+    /// The requests the firmware on the board accepts (`modes.MODES`), in its order.
+    /// Empty when the board doesn't say.
+    var modes: [String] = []
+    /// From `os.uname()`: machine ("Raspberry Pi Pico 2 W with RP2350") and MicroPython release.
+    var board: String?
+    var runtime: String?
+    /// The board's `.py` files; nil until read.
+    var files: [PicoFile]?
     var railVolts: Double?
     var lastWatchdogReset: Date?
 }
 
-/// What `bringup_mode.txt` asks the next battery boot to do.
+/// A file as stored on the board, or in the local firmware folder.
+nonisolated struct PicoFile: Equatable, Sendable {
+    var name: String
+    var bytes: Int
+    /// SHA-256, lowercase hex.
+    var sha: String
+}
+
+/// What `mode.txt` asks power-on to run.
 nonisolated enum PicoArm: Equatable, Sendable {
-    /// No `bringup_mode.txt`.
+    /// No `mode.txt`.
     case idle
-    /// The file's contents: `test`, `center`, `repeat:test`, `repeat:center`, or anything else, shown as-is.
+    /// The file's contents: one of the firmware's modes (`body`, `center`, `once:sweep`, …),
+    /// or anything else, shown as-is.
     case armed(String)
 
     var isArmed: Bool { self != .idle }
 
-    /// "idle", "armed: test", "repeat: center".
+    /// "idle", "boot: body" (every power-on), "once: sweep" (next boot only).
     var label: String {
         switch self {
         case .idle: "idle"
-        case .armed(let mode):
-            if mode.hasPrefix("repeat:") { "repeat: " + mode.dropFirst("repeat:".count) } else { "armed: " + mode }
+        case .armed(let mode): mode.hasPrefix("once:") ? Self.menuLabel(mode) : "boot: " + mode
         }
+    }
+
+    /// A mode as the Arm menu shows it: "body", "once: sweep".
+    static func menuLabel(_ mode: String) -> String {
+        mode.replacingOccurrences(of: ":", with: ": ")
     }
 }
 

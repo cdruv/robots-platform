@@ -1,18 +1,20 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
-/// Upload, arm next boot and leg offsets on the left; `mpremote` console on the right.
+/// Firmware files, power-on mode and leg offsets on the left; the commands run on the right.
 struct FirmwareView: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
         let store = app.firmware
-        let info = store.deviceInfo
+        let state = store.state
         VStack(spacing: 0) {
-            ViewHeader("Firmware", subtitle: info.map { "\($0.board) · \($0.runtime) · \($0.port)" } ?? "no device data")
+            ViewHeader("Firmware", subtitle: Self.subtitle(state))
             HStack(alignment: .top, spacing: 14) {
                 VStack(spacing: 12) {
-                    FirmwareUploadCard(store: store)
-                    ArmNextBootCard(store: store)
+                    if !state.hasDevice { USBRequiredCard() }
+                    FirmwareFilesCard(store: store)
+                    PowerOnModeCard(store: store)
                     LegOffsetsCard(store: store)
                     Spacer(minLength: 0)
                 }
@@ -23,12 +25,38 @@ struct FirmwareView: View {
             .padding(EdgeInsets(top: 6, leading: 20, bottom: 10, trailing: 20))
             .dimmedBehindPopover()
             ViewFooter(hasTopRule: true) {
-                Text(info.map { "\($0.tool) · \($0.toolEnvironment)" } ?? "mpremote —")
-                Text(info?.watchdog ?? "watchdog —")
+                Text(state.tool.map { "mpremote · \($0)" } ?? "mpremote not found")
                 Spacer()
-                Text("last upload \(info?.lastUpload ?? "—")")
-                    .foregroundStyle(Nocturne.neutral500)
             }
+        }
+        .onAppear { store.refreshLocal() }
+    }
+
+    private static func subtitle(_ state: FirmwareState) -> String {
+        guard let port = state.port else { return "no Pico on USB" }
+        let board = [state.board, state.runtime.map { "MicroPython \($0)" }].compactMap(\.self)
+        return (board + [port]).joined(separator: " · ")
+    }
+}
+
+/// Shown instead of guessing: everything in this tab runs over USB.
+private struct USBRequiredCard: View {
+    var body: some View {
+        Card {
+            HStack(spacing: 8) {
+                StatusDot(tone: .off)
+                Text("Pico not connected over USB")
+                    .font(.nocturne(14, .medium))
+                    .foregroundStyle(Nocturne.accent300)
+            }
+            Text("""
+                Connect the Pico 2 W with a USB data cable. Uploading, the power-on mode and \
+                calibration all go over USB with mpremote; this tab updates as soon as it's plugged in.
+                """)
+                .font(.nocturne(11.5))
+                .foregroundStyle(Nocturne.neutral500)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }
@@ -57,95 +85,132 @@ private struct CardHeader: View {
     }
 }
 
-struct FirmwareUploadCard: View {
+/// The local firmware folder against the board's files; Upload copies the changed ones.
+struct FirmwareFilesCard: View {
     let store: FirmwareStore
+    @State private var isChoosingFolder = false
 
     var body: some View {
-        let file = store.file
-        let differs = file?.differs ?? false
+        let state = store.state
+        let changed = state.changedFiles.count
         Card {
             CardHeader(
-                title: file?.name ?? "Firmware file",
-                status: file == nil ? "—" : differs ? "differs" : "in sync",
-                isStatusHighlighted: differs
+                title: "Firmware files",
+                note: state.isDefaultFolder ? "repo folder" : "chosen folder",
+                status: !state.hasDevice ? "needs USB" : !state.hasDeviceFiles ? "—" : changed > 0 ? "\(changed) to upload" : "in sync",
+                isStatusHighlighted: changed > 0
             )
+            HStack(spacing: 8) {
+                Text((state.folder as NSString).abbreviatingWithTildeInPath)
+                    .font(.nocturneMono(11))
+                    .foregroundStyle(state.hasLocalFolder ? Nocturne.neutral500 : Nocturne.accent300)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .help(state.folder)
+                Spacer(minLength: 0)
+                if !state.isDefaultFolder {
+                    Button("Use repo folder") { store.useDefaultFolder() }
+                        .buttonStyle(.nocturneGhost)
+                }
+                Button("Choose…") { isChoosingFolder = true }
+                    .buttonStyle(.nocturneSecondary)
+            }
+            .disabled(state.isBusy)
+            if !state.hasLocalFolder {
+                Text("Folder not found. Choose the folder that holds main.py.")
+                    .font(.nocturne(11.5))
+                    .foregroundStyle(Nocturne.accent300)
+            }
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 2) {
-                versionRow("device", file?.device, isKnown: file != nil)
-                versionRow("local", file?.local, isKnown: file != nil)
+                ForEach(state.files) { file in
+                    GridRow {
+                        Text(file.name)
+                            .foregroundStyle(Nocturne.neutral300)
+                        Text(file.local.map { "\(Fmt.grouped(Int64($0.bytes))) B" } ?? "—")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(Self.status(file, isDeviceKnown: state.hasDeviceFiles))
+                            .foregroundStyle(state.hasDeviceFiles && file.differs ? Nocturne.accent300 : Nocturne.neutral500)
+                    }
+                }
             }
             .font(.nocturneMono(11.5))
             .foregroundStyle(Nocturne.neutral500)
 
-            GeometryReader { geometry in
-                Capsule()
-                    .fill(Nocturne.accent)
-                    .shadow(color: Nocturne.accent, radius: 4)
-                    .frame(width: geometry.size.width * (store.uploadProgress ?? 0))
-            }
-            .frame(height: 3)
-            .background(Nocturne.neutral900, in: Capsule())
-
-            HStack(spacing: 8) {
-                Button(store.isUploading ? "Uploading…" : "Upload") { store.upload() }
-                    .buttonStyle(.nocturnePrimary)
-                    .disabled(store.isUploading || !differs || !store.hasDevice)
-                Button("Back up device copy") { store.backUpDeviceCopy() }
-                    .buttonStyle(.nocturneGhost)
-                    .disabled(!store.hasDevice)
-                Spacer(minLength: 0)
-                if let progress = store.uploadProgress {
-                    Text("\(Int(progress * 100))%")
-                        .font(.nocturneMono(11))
-                        .foregroundStyle(Nocturne.neutral500)
-                }
-            }
-        }
-    }
-
-    /// An unknown file shows dashes; a known file without a device copy shows "missing".
-    private func versionRow(_ label: String, _ version: FirmwareFile.Version?, isKnown: Bool) -> some View {
-        GridRow {
-            Text(label)
-            Text(version.map { "sha \($0.sha) · \(Fmt.grouped(Int64($0.bytes))) B" } ?? (isKnown ? "missing" : "—"))
-                .foregroundStyle(Nocturne.neutral300)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text(version?.date ?? "—")
-        }
-    }
-}
-
-struct ArmNextBootCard: View {
-    @Bindable var store: FirmwareStore
-
-    var body: some View {
-        Card {
-            CardHeader(
-                title: "Arm next boot",
-                note: "bringup_mode.txt",
-                status: store.isArmed.map { $0 ? "armed · \(store.armMode.rawValue)" : "not armed" } ?? "—",
-                isStatusHighlighted: store.isArmed == true
-            )
-            HStack(spacing: 10) {
-                NocturneSegmented(
-                    selection: $store.armMode,
-                    options: ArmMode.allCases.map { ($0, $0.rawValue) },
-                    horizontalPadding: 10,
-                    verticalPadding: 3
-                )
-                Toggle("repeat every power‑on", isOn: $store.repeatEveryBoot)
-                    .toggleStyle(NocturneCheckboxStyle())
-                    .font(.nocturne(12))
-                Spacer(minLength: 0)
-                Button("Arm") { store.arm() }
-                    .buttonStyle(.nocturneSecondary)
-                    .disabled(!store.hasDevice)
-            }
-            Text("Unplug USB, then switch battery on. 5 s countdown, finite action, release. \(Text("Keep battery off while USB is connected.").foregroundStyle(Nocturne.accent300))")
+            Button(state.isBusy ? "Working…" : changed > 0 ? "Upload \(changed)" : "Upload") { store.upload() }
+                .buttonStyle(.nocturnePrimary)
+                .disabled(!store.canUpload)
+            Text("Copies changed files with mpremote fs cp. No reset: new code runs from the next power-on.")
                 .font(.nocturne(11.5))
                 .foregroundStyle(Nocturne.neutral500)
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder]) { result in
+            if case .success(let folder) = result { store.chooseFolder(folder) }
+        }
+        .fileDialogDefaultDirectory(URL(fileURLWithPath: state.folder))
+    }
+
+    private static func status(_ file: FirmwareFile, isDeviceKnown: Bool) -> String {
+        guard isDeviceKnown else { return file.local == nil ? "—" : "local" }
+        switch (file.local, file.device) {
+        case (nil, _): return "board only"
+        case (_, nil): return "not on board"
+        default: return file.differs ? "differs" : "in sync"
+        }
+    }
+}
+
+/// What `mode.txt` asks power-on to run, chosen from the modes the board's firmware lists.
+struct PowerOnModeCard: View {
+    @Bindable var store: FirmwareStore
+
+    var body: some View {
+        let state = store.state
+        Card {
+            CardHeader(
+                title: "Power-on mode",
+                note: "mode.txt",
+                status: !state.hasDevice ? "needs USB" : state.bootMode?.label ?? "—",
+                isStatusHighlighted: state.bootMode?.isArmed == true
+            )
+            HStack(spacing: 10) {
+                if !state.modes.isEmpty {
+                    NocturneMenu(
+                        selection: Binding(get: { store.selectedBoot }, set: { store.bootSelection = $0 }),
+                        options: store.bootOptions
+                    )
+                }
+                Button("Apply") { store.applyBoot() }
+                    .buttonStyle(.nocturneSecondary)
+                    .disabled(!store.canApplyBoot)
+                Spacer(minLength: 0)
+            }
+            Text(Self.note(state))
+                .font(.nocturne(11.5))
+                .foregroundStyle(Nocturne.neutral500)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private static func note(_ state: FirmwareState) -> AttributedString {
+        if !state.hasDevice {
+            return AttributedString("Read from mode.txt on the board once the Pico is on USB.")
+        }
+        if state.hasDevice, state.bootMode != nil, state.modes.isEmpty {
+            var text = AttributedString("The firmware on the board lists no modes. Upload the firmware files first.")
+            text.foregroundColor = Nocturne.accent300
+            return text
+        }
+        var text = AttributedString("""
+            A mode runs on every power-on until changed, including plugging USB in; once: runs on \
+            the next boot only. Nothing moves until then. 
+            """)
+        var warning = AttributedString("Keep battery off while USB is connected.")
+        warning.foregroundColor = Nocturne.accent300
+        text.append(warning)
+        return text
     }
 }
 
@@ -158,7 +223,7 @@ struct LegOffsetsCard: View {
             CardHeader(
                 title: "Leg offsets",
                 note: "° from neutral 90 · ±\(Int(LegOffsets.range.upperBound))",
-                status: store.storedOffsets == nil ? "—" : unsaved > 0 ? "\(unsaved) unsaved" : "saved",
+                status: !store.hasDevice ? "needs USB" : store.storedOffsets == nil ? "not on the board yet" : unsaved > 0 ? "\(unsaved) unsaved" : "saved",
                 isStatusHighlighted: unsaved > 0
             )
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
@@ -180,7 +245,7 @@ struct LegOffsetsCard: View {
                     }
                 }
             }
-            .disabled(!store.hasDevice)
+            .disabled(!store.canCalibrate)
             HStack(spacing: 8) {
                 Button("Center") { store.centerLegs() }
                     .buttonStyle(.nocturneSecondary)
@@ -191,7 +256,7 @@ struct LegOffsetsCard: View {
                     .buttonStyle(.nocturnePrimary)
                     .disabled(unsaved == 0)
             }
-            .disabled(!store.hasDevice)
+            .disabled(!store.canCalibrate)
         }
     }
 
@@ -221,7 +286,7 @@ struct FirmwareConsole: View {
                                 .padding(.vertical, 2.5)
                         }
                         ForEach(store.consoleLines) { line in
-                            ConsoleRow(line: line, isRunning: line.kind == .progress && store.isUploading)
+                            ConsoleRow(line: line)
                                 .id(line.id)
                         }
                     }
@@ -235,14 +300,14 @@ struct FirmwareConsole: View {
                 }
             }
             HStack(spacing: 8) {
-                Text(store.hasDevice ? "next: mpremote reset · verify idle boot" : "no device")
+                Text(store.hasDevice ? "commands run from this tab" : "no Pico on USB")
                     .font(.nocturneMono(11))
                     .foregroundStyle(Nocturne.neutral600)
                     .lineLimit(1)
                 Spacer(minLength: 0)
-                Button("Open REPL") { store.openREPL() }
+                Button("Clear") { store.clearConsole() }
                     .buttonStyle(.nocturneGhost)
-                    .disabled(!store.hasDevice)
+                    .disabled(store.consoleLines.isEmpty)
             }
             .padding(EdgeInsets(top: 8, leading: 12, bottom: 10, trailing: 12))
         }
@@ -251,12 +316,11 @@ struct FirmwareConsole: View {
 
 private struct ConsoleRow: View {
     let line: ConsoleLine
-    let isRunning: Bool
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Rectangle()
-                .fill(isRunning ? Nocturne.accent : Nocturne.neutral800)
+                .fill(line.kind == .error ? Nocturne.accent : Nocturne.neutral800)
                 .frame(width: 3)
             Text(line.time, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits))
                 .foregroundStyle(Nocturne.neutral600)
@@ -264,6 +328,8 @@ private struct ConsoleRow: View {
                 .padding(.vertical, 2.5)
             Text(line.text)
                 .foregroundStyle(textColor)
+                .lineLimit(4)
+                .truncationMode(.middle)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.vertical, 2.5)
@@ -276,7 +342,7 @@ private struct ConsoleRow: View {
         switch line.kind {
         case .command: Nocturne.neutral200
         case .output: Nocturne.neutral600
-        case .progress: Nocturne.accent200
+        case .error: Nocturne.accent300
         }
     }
 }

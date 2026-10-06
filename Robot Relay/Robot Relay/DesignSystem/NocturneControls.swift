@@ -150,6 +150,38 @@ struct NocturneSegmented<Value: Hashable>: View {
     }
 }
 
+// MARK: - Menu
+
+/// A native pop-up menu inside the secondary button's outline, showing the selected option.
+struct NocturneMenu<Value: Hashable>: View {
+    @Binding var selection: Value
+    let options: [(value: Value, label: String)]
+    var fontSize: CGFloat = 12
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: Nocturne.Radius.md)
+        Menu {
+            Picker("", selection: $selection) {
+                ForEach(options, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+        } label: {
+            Text(options.first { $0.value == selection }?.label ?? "")
+        }
+        .menuStyle(.borderlessButton)
+        .font(.nocturne(fontSize, .medium))
+        .foregroundStyle(Nocturne.text)
+        .fixedSize()
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .overlay(shape.strokeBorder(Nocturne.divider, lineWidth: 1))
+        .contentShape(shape)
+    }
+}
+
 // MARK: - Checkbox
 
 struct NocturneCheckboxStyle: ToggleStyle {

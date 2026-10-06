@@ -25,17 +25,7 @@ final class PlaceholderRobotLinkService: RobotLinkService {
         current.phone.state = .disconnected
         current.phone.rttMs = nil
         current.phone.eventsPerSecond = 0
-        current.pico = PicoLink(route: .usb)
-        publish()
-    }
-
-    func releasePico() async {
-        current.pico.arm = .idle
-        publish()
-    }
-
-    func armPico(mode: ArmMode, repeatEveryBoot: Bool) async {
-        current.pico.arm = .armed(PicoMode.value(mode: mode, repeatEveryBoot: repeatEveryBoot))
+        current.pico = PicoLink(route: .usb, arm: .idle, modes: Self.modes)
         publish()
     }
 
@@ -58,12 +48,15 @@ final class PlaceholderRobotLinkService: RobotLinkService {
         continuation.yield(current)
     }
 
+    private static let modes = ["body", "center", "sweep", "once:center", "once:sweep"]
+
     private static func connected(address: String) -> RobotLinks {
         RobotLinks(
             phone: PhoneLink(state: .connected, deviceName: "Pixel 8", address: address, rttMs: 38, eventsPerSecond: 18, dropped: 0),
             pico: PicoLink(
                 route: .viaPhone,
-                arm: .armed("test"),
+                arm: .armed("body"),
+                modes: modes,
                 railVolts: 5.9,
                 lastWatchdogReset: Date.now.addingTimeInterval(-120)
             ),

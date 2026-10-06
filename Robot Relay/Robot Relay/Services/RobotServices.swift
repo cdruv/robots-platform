@@ -20,16 +20,17 @@ struct RobotServices {
         )
     }
 
-    /// The phone link, its telemetry and the Pico over USB are real. Everything else reports
-    /// no data, so the UI shows dashes instead of canned values.
+    /// The phone link, its telemetry and the Pico over USB (status and firmware) are real.
+    /// Everything else reports no data, so the UI shows dashes instead of canned values.
     static func live() -> RobotServices {
         let phone = PhoneConnection()
         let runner = CommandRunner()
+        let pico = PicoUSBLink(runner: runner)
         return RobotServices(
-            link: PhoneLinkService(connection: phone, runner: runner, pico: PicoUSBLink(runner: runner)),
+            link: PhoneLinkService(connection: phone, runner: runner, pico: pico),
             telemetry: PhoneTelemetryService(connection: phone),
             live: UnavailableLiveStreamService(),
-            firmware: UnavailableFirmwareService(),
+            firmware: PicoFirmwareService(pico: pico),
             drive: PlaceholderDriveService()
         )
     }
@@ -41,12 +42,6 @@ protocol RobotLinkService: AnyObject {
     func links() -> AsyncStream<RobotLinks>
     func connectPhone(address: String) async
     func disconnectPhone() async
-    /// Over USB this disarms: deletes `bringup_mode.txt` so the next battery boot does nothing.
-    /// No remote stop exists; removing power is the immediate stop.
-    func releasePico() async
-    /// Over USB, writes `bringup_mode.txt` so the next battery boot runs `mode`, the same
-    /// command as the firmware README. Nothing moves until that boot.
-    func armPico(mode: ArmMode, repeatEveryBoot: Bool) async
     func pairController() async
     /// Runs `adb forward` so the phone's telemetry port is reachable on localhost.
     func adbForward(address: String) async
@@ -69,25 +64,26 @@ protocol LiveStreamService: AnyObject {
     func setMuted(_ isMuted: Bool) async
 }
 
-/// Pico firmware management over `mpremote`: upload, arming, calibration.
+/// Pico firmware and board configuration over `mpremote`: upload, power-on mode, calibration.
 protocol FirmwareService: AnyObject {
-    /// nil when no Pico is reachable; the Firmware view then shows no data and disables its actions.
-    var deviceInfo: FirmwareDeviceInfo? { get }
-    /// The firmware file, with the device copy and the local copy.
-    var file: FirmwareFile? { get }
-    /// Offsets currently stored on the device.
-    var storedOffsets: LegOffsets? { get }
-    /// Console output. A line re-sent with the same `id` replaces the earlier one. Single consumer.
+    /// Current state followed by every change. Single consumer.
+    func state() -> AsyncStream<FirmwareState>
+    /// The commands the service runs, each followed by its result. Single consumer.
     func console() -> AsyncStream<ConsoleLine>
-    /// Copies the local file to the device, yielding progress 0…1.
-    func upload(_ file: FirmwareFile) -> AsyncStream<Double>
-    func backUpDeviceCopy() async
-    /// Writes `bringup_mode.txt` so the next battery boot runs `mode`.
-    func arm(mode: ArmMode, repeatEveryBoot: Bool) async
+    /// Re-reads the local firmware folder. Doesn't touch the board.
+    func refreshLocal() async
+    /// Uploads from `folder` from now on, remembered across launches; nil returns to the
+    /// repository's firmware folder.
+    func setFolder(_ folder: URL?) async
+    /// Copies the local files that differ from the board's, then reads the board again.
+    /// Never resets the board: the new code runs from the next power-on.
+    func upload() async
+    /// Writes `mode` (one of `FirmwareState.modes`) to `mode.txt`; nil deletes the file, so
+    /// power-on runs nothing. Nothing moves until the next power-on.
+    func setBootMode(_ mode: String?) async
     func writeOffsets(_ offsets: LegOffsets) async
     func centerLegs() async
     func sweepLegs(degrees: Double) async
-    func openREPL() async
 }
 
 /// Manual driving from a game controller. Not designed yet.

@@ -1,33 +1,72 @@
 import Foundation
 
-nonisolated struct FirmwareFile: Equatable, Sendable {
+/// One firmware file: the local copy and the board's copy, either of which may be missing.
+nonisolated struct FirmwareFile: Identifiable, Equatable, Sendable {
     struct Version: Equatable, Sendable {
         var sha: String
         var bytes: Int
-        var date: String
     }
 
     var name: String
+    var local: Version?
     var device: Version?
-    var local: Version
 
-    var differs: Bool { device?.sha != local.sha }
+    var id: String { name }
+
+    /// Local and board copies differ (including one of them missing).
+    var differs: Bool { local != device }
+
+    /// Pairs local and board files by name, sorted. `device` nil means the board wasn't read,
+    /// so board copies stay unknown.
+    static func merge(local: [PicoFile], device: [PicoFile]?) -> [FirmwareFile] {
+        let names = Set(local.map(\.name)).union((device ?? []).map(\.name)).sorted()
+        return names.map { name in
+            FirmwareFile(
+                name: name,
+                local: local.first { $0.name == name }.map { Version(sha: $0.sha, bytes: $0.bytes) },
+                device: device?.first { $0.name == name }.map { Version(sha: $0.sha, bytes: $0.bytes) }
+            )
+        }
+    }
 }
 
-/// The Pico and the toolchain used to reach it.
-nonisolated struct FirmwareDeviceInfo: Equatable, Sendable {
-    var board: String
-    var runtime: String
-    var port: String
-    var tool: String
-    var toolEnvironment: String
-    var watchdog: String
-    var lastUpload: String
-}
+/// Everything the Firmware view shows about the Pico on USB and the local firmware folder.
+nonisolated struct FirmwareState: Equatable, Sendable {
+    /// nil when no Pico is on USB.
+    var port: String?
+    /// From `os.uname()`; nil until read.
+    var board: String?
+    var runtime: String?
+    /// Where the local firmware lives, and where `mpremote` was found (nil: not found).
+    var folder: String
+    var tool: String?
+    /// The folder is `Yobot/firmware/pico` in the checkout the app was built from.
+    var isDefaultFolder = true
+    /// False when the folder is missing; `files` then only lists the board's.
+    var hasLocalFolder = false
+    /// False until the board's files are read.
+    var hasDeviceFiles = false
+    var files: [FirmwareFile] = []
+    /// What `mode.txt` asks power-on to run; nil until read.
+    var bootMode: PicoArm?
+    /// What the board's firmware accepts (`modes.MODES`).
+    var modes: [String] = []
+    /// An upload or mode change is running.
+    var isBusy = false
+    /// nil: leg calibration isn't on the board yet.
+    var storedOffsets: LegOffsets?
 
-/// Action `bringup_mode.txt` arms for the next battery boot.
-nonisolated enum ArmMode: String, CaseIterable, Sendable {
-    case center, test
+    init(folder: String = "") {
+        self.folder = folder
+    }
+
+    var hasDevice: Bool { port != nil }
+
+    /// Local files the board lacks or holds a different version of.
+    var changedFiles: [FirmwareFile] {
+        guard hasDeviceFiles else { return [] }
+        return files.filter { $0.local != nil && $0.differs }
+    }
 }
 
 nonisolated enum LegSide: CaseIterable, Sendable {
@@ -64,7 +103,7 @@ nonisolated enum ServoMath {
 
 nonisolated struct ConsoleLine: Identifiable, Equatable, Sendable {
     enum Kind: Sendable {
-        case command, output, progress
+        case command, output, error
     }
 
     var id = UUID()

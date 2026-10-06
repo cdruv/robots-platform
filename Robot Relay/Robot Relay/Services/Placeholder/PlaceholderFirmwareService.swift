@@ -2,70 +2,72 @@ import Foundation
 
 /// Echoes the `mpremote` commands a real implementation would run; nothing is executed.
 final class PlaceholderFirmwareService: FirmwareService {
-    let deviceInfo: FirmwareDeviceInfo? = FirmwareDeviceInfo(
-        board: "Pico 2 W",
-        runtime: "MicroPython 1.28",
-        port: "/dev/tty.usbmodem14201",
-        tool: "mpremote 1.25",
-        toolEnvironment: "~/.venvs/pico",
-        watchdog: "watchdog 2 s · release on idle",
-        lastUpload: "2026‑09‑28 21:14"
-    )
-    let file: FirmwareFile? = FirmwareFile(
-        name: "servo_bringup / main.py",
-        device: .init(sha: "0fe53", bytes: 3402, date: "2026‑09‑28"),
-        local: .init(sha: "34cc7", bytes: 3614, date: "2026‑10‑04")
-    )
-    let storedOffsets: LegOffsets? = LegOffsets(left: -2.0, right: 1.5)
-
-    private let stream: AsyncStream<ConsoleLine>
-    private let continuation: AsyncStream<ConsoleLine>.Continuation
+    private var current: FirmwareState
+    private let states = AsyncStream.makeStream(of: FirmwareState.self, bufferingPolicy: .bufferingNewest(1))
+    private let lines = AsyncStream.makeStream(of: ConsoleLine.self)
 
     init() {
-        (stream, continuation) = AsyncStream.makeStream(of: ConsoleLine.self)
-        let start = Date.now.addingTimeInterval(-8)
-        emit("$ mpremote fs ls", .command, at: start)
-        emit("ls :\n   3402 main.py", .output, at: start)
-        emit("$ mpremote fs cp :main.py main-backup.py", .command, at: start.addingTimeInterval(3))
-        emit("cp :main.py main-backup.py", .output, at: start.addingTimeInterval(3))
+        var state = FirmwareState(folder: "~/robots/Yobot/firmware/pico")
+        state.port = "/dev/cu.usbmodem14201"
+        state.board = "Raspberry Pi Pico 2 W with RP2350"
+        state.runtime = "1.28.0"
+        state.tool = "~/.venvs/pico/bin"
+        state.hasLocalFolder = true
+        state.hasDeviceFiles = true
+        state.files = [
+            FirmwareFile(name: "body.py", local: .init(sha: "9955804", bytes: 240), device: .init(sha: "9955804", bytes: 240)),
+            FirmwareFile(name: "main.py", local: .init(sha: "dcff7a0", bytes: 141), device: .init(sha: "dcff7a0", bytes: 141)),
+            FirmwareFile(name: "modes.py", local: .init(sha: "34cc7e1", bytes: 1532), device: .init(sha: "d0f5127", bytes: 1488)),
+            FirmwareFile(name: "servo_check.py", local: .init(sha: "c022684", bytes: 2691), device: nil),
+        ]
+        state.bootMode = .armed("body")
+        state.modes = ["body", "center", "sweep", "once:center", "once:sweep"]
+        state.storedOffsets = LegOffsets(left: -2.0, right: 1.5)
+        current = state
+        states.continuation.yield(state)
+        emit("$ mpremote connect /dev/cu.usbmodem14201 exec …", .command)
+        emit("boot: body", .output)
     }
 
-    func console() -> AsyncStream<ConsoleLine> { stream }
+    func state() -> AsyncStream<FirmwareState> { states.stream }
 
-    func upload(_ file: FirmwareFile) -> AsyncStream<Double> {
-        let (progress, progressContinuation) = AsyncStream.makeStream(of: Double.self)
-        let task = Task {
-            emit("$ mpremote fs cp main.py :main.py", .command)
-            var line = ConsoleLine(text: "", kind: .progress)
-            let steps = 40
-            for step in 0...steps {
-                if Task.isCancelled { break }
-                let fraction = Double(step) / Double(steps)
-                let filled = Int((fraction * 20).rounded())
-                let bar = String(repeating: "▮", count: filled) + String(repeating: "▯", count: 20 - filled)
-                line.text = "cp main.py :main.py  \(bar) \(Int(fraction * 100))%"
-                continuation.yield(line)
-                progressContinuation.yield(fraction)
-                try? await Task.sleep(for: .milliseconds(90))
-            }
-            progressContinuation.finish()
+    func console() -> AsyncStream<ConsoleLine> { lines.stream }
+
+    func refreshLocal() async {}
+
+    func setFolder(_ folder: URL?) async {
+        current.folder = folder?.path ?? "~/robots/Yobot/firmware/pico"
+        current.isDefaultFolder = folder == nil
+        publish()
+    }
+
+    func upload() async {
+        let names = current.changedFiles.map(\.name)
+        emit("$ mpremote fs cp \(names.joined(separator: " ")) :", .command)
+        current.files = current.files.map { file in
+            var file = file
+            if file.local != nil { file.device = file.local }
+            return file
         }
-        progressContinuation.onTermination = { _ in task.cancel() }
-        return progress
+        publish()
+        emit("copied \(names.joined(separator: ", "))", .output)
     }
 
-    func backUpDeviceCopy() async {
-        emit("$ mpremote fs cp :main.py main-backup.py", .command)
-        emit("cp :main.py main-backup.py", .output)
-    }
-
-    func arm(mode: ArmMode, repeatEveryBoot: Bool) async {
-        let value = repeatEveryBoot ? "\(mode.rawValue) repeat" : mode.rawValue
-        emit("$ mpremote exec \"open('bringup_mode.txt','w').write('\(value)')\"", .command)
+    func setBootMode(_ mode: String?) async {
+        if let mode {
+            emit("$ mpremote exec \"with open('mode.txt', 'w') as f: f.write('\(mode)')\"", .command)
+        } else {
+            emit("$ mpremote exec \"import os; os.remove('mode.txt')\"", .command)
+        }
+        current.bootMode = mode.map(PicoArm.armed) ?? .idle
+        publish()
+        emit("ok", .output)
     }
 
     func writeOffsets(_ offsets: LegOffsets) async {
         emit("$ mpremote exec \"open('leg_offsets.txt','w').write('\(offsets.left) \(offsets.right)')\"", .command)
+        current.storedOffsets = offsets
+        publish()
     }
 
     func centerLegs() async {
@@ -78,12 +80,11 @@ final class PlaceholderFirmwareService: FirmwareService {
         emit("sweep ±\(Fmt.trimmed(degrees))° done; servos released", .output)
     }
 
-    func openREPL() async {
-        emit("$ mpremote repl", .command)
-        emit("REPL is not available in this build", .output)
+    private func publish() {
+        states.continuation.yield(current)
     }
 
-    private func emit(_ text: String, _ kind: ConsoleLine.Kind, at time: Date = .now) {
-        continuation.yield(ConsoleLine(time: time, text: text, kind: kind))
+    private func emit(_ text: String, _ kind: ConsoleLine.Kind) {
+        lines.continuation.yield(ConsoleLine(text: text, kind: kind))
     }
 }

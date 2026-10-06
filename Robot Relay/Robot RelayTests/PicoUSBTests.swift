@@ -4,7 +4,7 @@ import Testing
 struct PicoModeTests {
     @Test func readsTheModeLine() {
         #expect(PicoMode.parse("mode=test\n") == .armed("test"))
-        #expect(PicoMode.parse("mode=repeat:center\r\n") == .armed("repeat:center"))
+        #expect(PicoMode.parse("mode=once:sweep\r\n") == .armed("once:sweep"))
         #expect(PicoMode.parse("mode=\n") == .idle)
     }
 
@@ -17,11 +17,24 @@ struct PicoModeTests {
         #expect(PicoMode.parse("Traceback (most recent call last):\nOSError: 2\n") == nil)
     }
 
-    @Test func armWritesWhatMainPyAccepts() {
-        #expect(PicoMode.value(mode: .test, repeatEveryBoot: false) == "test")
-        #expect(PicoMode.value(mode: .center, repeatEveryBoot: true) == "repeat:center")
-        #expect(PicoMode.armScript("repeat:test")
-            == "with open('bringup_mode.txt', 'w') as f: f.write('repeat:test')")
+    @Test func armWritesTheReadmeCommand() {
+        #expect(PicoMode.armScript("once:sweep")
+            == "with open('mode.txt', 'w') as f: f.write('once:sweep')")
+    }
+
+    @Test func readsTheModesTheFirmwareLists() {
+        let output = "mode=\nmodes=body,center,sweep,once:center,once:sweep\r\n"
+        #expect(PicoMode.parse(output) == .idle)
+        #expect(PicoMode.parseModes(output) == ["body", "center", "sweep", "once:center", "once:sweep"])
+    }
+
+    @Test func firmwareWithoutModesListsNone() {
+        #expect(PicoMode.parseModes("mode=test\nmodes=\n").isEmpty)
+        #expect(PicoMode.parseModes("mode=test\n").isEmpty)
+    }
+
+    @Test func dropsModesThatCouldNotBeWrittenBack() {
+        #expect(PicoMode.parseModes("modes=test, body ,it's,a b,\n") == ["test", "body"])
     }
 }
 
@@ -41,14 +54,19 @@ struct PicoUSBTests {
 struct PicoArmTests {
     @Test func labels() {
         #expect(PicoArm.idle.label == "idle")
-        #expect(PicoArm.armed("test").label == "armed: test")
-        #expect(PicoArm.armed("repeat:center").label == "repeat: center")
-        #expect(PicoArm.armed("bogus").label == "armed: bogus")
+        #expect(PicoArm.armed("body").label == "boot: body")
+        #expect(PicoArm.armed("once:center").label == "once: center")
+        #expect(PicoArm.armed("bogus").label == "boot: bogus")
+    }
+
+    @Test func menuLabels() {
+        #expect(PicoArm.menuLabel("body") == "body")
+        #expect(PicoArm.menuLabel("once:sweep") == "once: sweep")
     }
 
     @Test func onlyIdleIsDisarmed() {
         #expect(!PicoArm.idle.isArmed)
         #expect(PicoArm.armed("test").isArmed)
-        #expect(PicoArm.armed("repeat:test").isArmed)
+        #expect(PicoArm.armed("once:sweep").isArmed)
     }
 }
