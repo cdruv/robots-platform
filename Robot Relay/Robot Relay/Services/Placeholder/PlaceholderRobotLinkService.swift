@@ -30,7 +30,7 @@ final class PlaceholderRobotLinkService: RobotLinkService {
     }
 
     func releasePico() async {
-        current.pico.isArmed = false
+        current.pico.arm = .idle
         publish()
     }
 
@@ -44,8 +44,6 @@ final class PlaceholderRobotLinkService: RobotLinkService {
         publish()
     }
 
-    func addRobot() async {}
-
     private func publish() {
         continuation.yield(current)
     }
@@ -55,7 +53,7 @@ final class PlaceholderRobotLinkService: RobotLinkService {
             phone: PhoneLink(state: .connected, deviceName: "Pixel 8", address: address, rttMs: 38, eventsPerSecond: 18, dropped: 0),
             pico: PicoLink(
                 route: .viaPhone,
-                isArmed: true,
+                arm: .armed("test"),
                 railVolts: 5.9,
                 lastWatchdogReset: Date.now.addingTimeInterval(-120)
             ),

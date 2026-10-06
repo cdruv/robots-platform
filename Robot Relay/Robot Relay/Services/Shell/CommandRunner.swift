@@ -18,7 +18,7 @@ nonisolated struct CommandResult: Sendable {
     }
 }
 
-/// Runs command-line tools (`adb`, later `mpremote`) the way a terminal would, and reports
+/// Runs command-line tools (`adb`, `mpremote`) the way a terminal would, and reports
 /// each run to the activity footer as the command a person would type.
 final class CommandRunner {
     /// Receives a `.running` entry when a command starts and the same entry, finished, when it ends.
@@ -65,7 +65,13 @@ final class CommandRunner {
             if let sdk = environment[key], !sdk.isEmpty { directories.append(sdk + "/platform-tools") }
         }
         let home = environment["HOME"] ?? NSHomeDirectory()
-        directories += [home + "/Library/Android/sdk/platform-tools", "/opt/homebrew/bin", "/usr/local/bin"]
+        directories += [
+            home + "/Library/Android/sdk/platform-tools",
+            home + "/.venvs/pico/bin",  // The firmware README's mpremote venv.
+            home + "/.local/bin",  // pipx
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+        ]
         return directories
     }
 

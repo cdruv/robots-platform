@@ -87,8 +87,4 @@ final class ConnectionStore {
     func adbForward() {
         Task { await service.adbForward(address: addressDraft) }
     }
-
-    func addRobot() {
-        Task { await service.addRobot() }
-    }
 }

@@ -81,9 +81,31 @@ nonisolated struct PicoLink: Equatable, Sendable {
 
     /// nil: nothing reports on the Pico yet.
     var route: Route?
-    var isArmed = false
+    /// The serial port on the USB route, for example `/dev/cu.usbmodem1101`.
+    var port: String?
+    /// nil: not read yet, or the port was busy.
+    var arm: PicoArm?
     var railVolts: Double?
     var lastWatchdogReset: Date?
+}
+
+/// What `bringup_mode.txt` asks the next battery boot to do.
+nonisolated enum PicoArm: Equatable, Sendable {
+    /// No `bringup_mode.txt`.
+    case idle
+    /// The file's contents: `test`, `center`, `repeat:test`, `repeat:center`, or anything else, shown as-is.
+    case armed(String)
+
+    var isArmed: Bool { self != .idle }
+
+    /// "idle", "armed: test", "repeat: center".
+    var label: String {
+        switch self {
+        case .idle: "idle"
+        case .armed(let mode):
+            if mode.hasPrefix("repeat:") { "repeat: " + mode.dropFirst("repeat:".count) } else { "armed: " + mode }
+        }
+    }
 }
 
 /// The game controller. All nil until something reports on it.

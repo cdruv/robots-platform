@@ -223,7 +223,7 @@ struct SystemTile: View {
                 }
                 GridRow {
                     LabeledValue(label: "servo rail", value: pico.railVolts.map { String(format: "%.1f V", $0) } ?? "—")
-                    LabeledValue(label: "pico", value: pico.route == nil || pico.route == .offline ? "—" : pico.isArmed ? "armed" : "released")
+                    LabeledValue(label: "pico", value: pico.route == nil || pico.route == .offline ? "—" : pico.arm?.label ?? "—")
                 }
             }
             .font(.nocturneMono(12))

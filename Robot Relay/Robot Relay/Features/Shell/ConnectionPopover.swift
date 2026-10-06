@@ -14,9 +14,6 @@ struct ConnectionPopover: View {
                 Text("\(links.linkCount) links")
                     .font(.nocturneMono(11))
                     .foregroundStyle(Nocturne.neutral500)
-                Spacer()
-                Button("Add robot…") { connection.addRobot() }
-                    .buttonStyle(.nocturneGhost)
             }
 
             VStack(spacing: 0) {

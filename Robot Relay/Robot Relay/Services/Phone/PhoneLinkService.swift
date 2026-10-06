@@ -55,8 +55,6 @@ final class PhoneLinkService: RobotLinkService {
         connection.connect(to: PhoneAddress(host: "127.0.0.1", port: port))
     }
 
-    func addRobot() async {}
-
     private func apply(_ status: PhoneConnection.Status) {
         var phone = current.phone
         phone.state = status.state

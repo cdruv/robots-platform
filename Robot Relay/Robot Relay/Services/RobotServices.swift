@@ -45,7 +45,6 @@ protocol RobotLinkService: AnyObject {
     func pairController() async
     /// Runs `adb forward` so the phone's telemetry port is reachable on localhost.
     func adbForward(address: String) async
-    func addRobot() async
 }
 
 /// Telemetry events from onboard-android (NDJSON over TCP :7777).
