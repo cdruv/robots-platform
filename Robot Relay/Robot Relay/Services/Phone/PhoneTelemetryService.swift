@@ -1,7 +1,6 @@
 import Foundation
 
-/// Live telemetry from the shared `PhoneConnection`. Terminal equivalent:
-/// `scripts/relay-phone.sh tail --pretty`.
+/// Live telemetry from the shared `PhoneConnection`.
 final class PhoneTelemetryService: TelemetryService {
     private let connection: PhoneConnection
 

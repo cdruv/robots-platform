@@ -2,7 +2,7 @@ import Foundation
 
 /// The phone row for real: TCP to onboard-android, optionally through `adb forward`.
 /// The Pico over USB via mpremote (`PicoUSBLink`). The controller stays offline until its
-/// transport exists. Terminal equivalents: `scripts/relay-phone.sh`, `scripts/relay-pico.sh`.
+/// transport exists.
 final class PhoneLinkService: RobotLinkService {
     private var current = RobotLinks()
     private let stream: AsyncStream<RobotLinks>
@@ -45,8 +45,8 @@ final class PhoneLinkService: RobotLinkService {
 
     func pairController() async {}
 
-    /// `relay-phone.sh forward`: `adb devices`, pick the one online phone, forward its port to
-    /// localhost, then connect to `127.0.0.1:port`.
+    /// Runs `adb devices`, picks the one online phone, forwards its port to
+    /// localhost, then connects to `127.0.0.1:port`.
     func adbForward(address: String) async {
         let port = PhoneAddress(address)?.port ?? PhoneAddress.defaultPort
         var serials: [String] = []

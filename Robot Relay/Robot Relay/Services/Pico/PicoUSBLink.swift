@@ -6,7 +6,6 @@ import Foundation
 ///
 /// The mode is read only on connect and after Disarm. There is no polling, because every
 /// mpremote call interrupts the board and takes the serial port.
-/// Terminal equivalent: `scripts/relay-pico.sh`.
 final class PicoUSBLink {
     var onChange: ((PicoLink) -> Void)?
     private(set) var current = PicoLink()
@@ -31,10 +30,18 @@ final class PicoUSBLink {
 
     /// Deletes `bringup_mode.txt`, then reads the mode back so the row shows the board's state.
     func disarm() async {
+    }
+
+    /// Writes `value` (from `PicoMode.value`) to `bringup_mode.txt`, then reads the mode back.
+    func arm(_ value: String) async {
+        await execThenRead(PicoMode.armScript(value))
+    }
+
+    private func execThenRead(_ script: String) async {
         await enqueue { [weak self] in
             guard let self, let port = current.port else { return }
             let generation = generation
-            let result = await runner.run("mpremote", ["connect", port, "exec", PicoMode.disarmScript])
+            let result = await runner.run("mpremote", ["connect", port, "exec", script])
             guard result.succeeded, generation == self.generation else { return }
             await readMode()
         }.value
@@ -79,7 +86,7 @@ final class PicoUSBLink {
     }
 }
 
-/// The `bringup_mode.txt` scripts, shared with `scripts/relay-pico.sh` and tests.
+/// The `bringup_mode.txt` scripts, shared with tests.
 nonisolated enum PicoMode {
     static let file = "bringup_mode.txt"
 

@@ -41,7 +41,7 @@ data class TcpServerStatus(
  * Lines that concern one client only carry a `link` key and no `seq`: each client first
  * gets `{"link":"hello","protocol":1,…,"session":"<uuid>","port":7777}` (fields from [hello]),
  * and a client line `{"ping":n}` is answered with `{"link":"pong","ping":n}`, queued behind
- * pending telemetry. `Robot Relay/scripts/relay-phone.sh` wraps all of this for the terminal.
+ * pending telemetry.
  */
 class TcpServerSink(
     private val port: Int = DEFAULT_PORT,
