@@ -7,8 +7,6 @@ final class LiveRobotStore {
     private(set) var isRecording = false
     private(set) var isMuted = false
     var focusedStream: LiveStream?
-    /// The design opens on a session that is 14:22 in.
-    let sessionStart = Date.now.addingTimeInterval(-(14 * 60 + 22))
 
     private let service: any LiveStreamService
     private var task: Task<Void, Never>?

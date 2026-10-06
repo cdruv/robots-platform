@@ -23,7 +23,8 @@ nonisolated struct PhoneLink: Equatable, Sendable {
     var state: State = .disconnected
     /// From the phone's hello line.
     var deviceName = "—"
-    var address = PhoneAddress.defaultForward.description
+    /// Empty until the first connect.
+    var address = ""
     var rttMs: Int?
     var eventsPerSecond = 0
     var dropped = 0
@@ -32,7 +33,8 @@ nonisolated struct PhoneLink: Equatable, Sendable {
 
     /// Localhost means an `adb forward` over USB.
     var transport: String {
-        PhoneAddress(address)?.isLoopback == true ? "USB · adb" : "Wi‑Fi"
+        guard let address = PhoneAddress(address) else { return "—" }
+        return address.isLoopback ? "USB · adb" : "Wi‑Fi"
     }
 }
 
@@ -77,14 +79,16 @@ nonisolated struct PicoLink: Equatable, Sendable {
         case viaPhone, usb, offline
     }
 
-    var route: Route = .offline
+    /// nil: nothing reports on the Pico yet.
+    var route: Route?
     var isArmed = false
     var railVolts: Double?
     var lastWatchdogReset: Date?
 }
 
+/// The game controller. All nil until something reports on it.
 nonisolated struct ControllerLink: Equatable, Sendable {
-    var name = "Xbox"
-    var transport = "Bluetooth"
-    var isPaired = false
+    var name: String?
+    var transport: String?
+    var isPaired: Bool?
 }

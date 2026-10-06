@@ -27,6 +27,11 @@ nonisolated enum Fmt {
             : String(format: "%g", value)
     }
 
+    /// The value, or an em dash when there is no data.
+    static func dash<Value: CustomStringConvertible>(_ value: Value?) -> String {
+        value.map { "\($0)" } ?? "—"
+    }
+
     /// `2 min ago`.
     static func ago(_ date: Date, now: Date = .now) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(date)))

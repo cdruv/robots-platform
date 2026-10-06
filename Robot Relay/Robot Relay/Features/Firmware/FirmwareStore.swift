@@ -3,24 +3,25 @@ import Observation
 
 @Observable
 final class FirmwareStore {
-    private(set) var file = FirmwareFile(
-        name: "servo_bringup / main.py",
-        device: .init(sha: "0fe53", bytes: 3402, date: "2026‑09‑28"),
-        local: .init(sha: "34cc7", bytes: 3614, date: "2026‑10‑04")
-    )
+    /// nil until the service reports one.
+    private(set) var file: FirmwareFile?
     /// 0…1 while an upload is running.
     private(set) var uploadProgress: Double?
 
     var armMode: ArmMode = .center
     var repeatEveryBoot = false
-    private(set) var isArmed = false
+    /// nil: unknown. Set only after arming from here.
+    private(set) var isArmed: Bool?
 
-    var offsets = LegOffsets(left: -3.0, right: 1.5)
-    private(set) var storedOffsets = LegOffsets(left: -2.0, right: 1.5)
+    /// The offsets being edited, starting from the stored ones (or neutral when unknown).
+    var offsets: LegOffsets
+    /// What the device holds; nil when unknown.
+    private(set) var storedOffsets: LegOffsets?
 
     private(set) var consoleLines: [ConsoleLine] = []
 
-    let deviceInfo: FirmwareDeviceInfo
+    /// nil when no Pico is reachable; actions are disabled then.
+    let deviceInfo: FirmwareDeviceInfo?
 
     private let service: any FirmwareService
     private var task: Task<Void, Never>?
@@ -28,6 +29,9 @@ final class FirmwareStore {
     init(service: any FirmwareService) {
         self.service = service
         deviceInfo = service.deviceInfo
+        file = service.file
+        storedOffsets = service.storedOffsets
+        offsets = service.storedOffsets ?? LegOffsets(left: 0, right: 0)
     }
 
     func start() {
@@ -39,6 +43,8 @@ final class FirmwareStore {
         }
     }
 
+    var hasDevice: Bool { deviceInfo != nil }
+
     var isUploading: Bool { uploadProgress != nil }
 
     var unsavedOffsetCount: Int {
@@ -46,17 +52,18 @@ final class FirmwareStore {
     }
 
     func isUnsaved(_ side: LegSide) -> Bool {
-        offsets[side] != storedOffsets[side]
+        guard let storedOffsets else { return false }
+        return offsets[side] != storedOffsets[side]
     }
 
     func upload() {
-        guard !isUploading else { return }
+        guard !isUploading, let file else { return }
         uploadProgress = 0
         Task {
             for await progress in service.upload(file) {
                 uploadProgress = progress
             }
-            file.device = file.local
+            self.file?.device = file.local
             uploadProgress = nil
         }
     }

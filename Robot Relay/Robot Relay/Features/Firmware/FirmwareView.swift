@@ -8,7 +8,7 @@ struct FirmwareView: View {
         let store = app.firmware
         let info = store.deviceInfo
         VStack(spacing: 0) {
-            ViewHeader("Firmware", subtitle: "\(info.board) · \(info.runtime) · \(info.port)")
+            ViewHeader("Firmware", subtitle: info.map { "\($0.board) · \($0.runtime) · \($0.port)" } ?? "no device data")
             HStack(alignment: .top, spacing: 14) {
                 VStack(spacing: 12) {
                     FirmwareUploadCard(store: store)
@@ -23,10 +23,10 @@ struct FirmwareView: View {
             .padding(EdgeInsets(top: 6, leading: 20, bottom: 10, trailing: 20))
             .dimmedBehindPopover()
             ViewFooter(hasTopRule: true) {
-                Text("\(info.tool) · \(info.toolEnvironment)")
-                Text(info.watchdog)
+                Text(info.map { "\($0.tool) · \($0.toolEnvironment)" } ?? "mpremote —")
+                Text(info?.watchdog ?? "watchdog —")
                 Spacer()
-                Text("last upload \(info.lastUpload)")
+                Text("last upload \(info?.lastUpload ?? "—")")
                     .foregroundStyle(Nocturne.neutral500)
             }
         }
@@ -62,15 +62,16 @@ struct FirmwareUploadCard: View {
 
     var body: some View {
         let file = store.file
+        let differs = file?.differs ?? false
         Card {
             CardHeader(
-                title: file.name,
-                status: file.differs ? "differs" : "in sync",
-                isStatusHighlighted: file.differs
+                title: file?.name ?? "Firmware file",
+                status: file == nil ? "—" : differs ? "differs" : "in sync",
+                isStatusHighlighted: differs
             )
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 2) {
-                versionRow("device", file.device)
-                versionRow("local", file.local)
+                versionRow("device", file?.device, isKnown: file != nil)
+                versionRow("local", file?.local, isKnown: file != nil)
             }
             .font(.nocturneMono(11.5))
             .foregroundStyle(Nocturne.neutral500)
@@ -87,9 +88,10 @@ struct FirmwareUploadCard: View {
             HStack(spacing: 8) {
                 Button(store.isUploading ? "Uploading…" : "Upload") { store.upload() }
                     .buttonStyle(.nocturnePrimary)
-                    .disabled(store.isUploading || !file.differs)
+                    .disabled(store.isUploading || !differs || !store.hasDevice)
                 Button("Back up device copy") { store.backUpDeviceCopy() }
                     .buttonStyle(.nocturneGhost)
+                    .disabled(!store.hasDevice)
                 Spacer(minLength: 0)
                 if let progress = store.uploadProgress {
                     Text("\(Int(progress * 100))%")
@@ -100,10 +102,11 @@ struct FirmwareUploadCard: View {
         }
     }
 
-    private func versionRow(_ label: String, _ version: FirmwareFile.Version?) -> some View {
+    /// An unknown file shows dashes; a known file without a device copy shows "missing".
+    private func versionRow(_ label: String, _ version: FirmwareFile.Version?, isKnown: Bool) -> some View {
         GridRow {
             Text(label)
-            Text(version.map { "sha \($0.sha) · \(Fmt.grouped(Int64($0.bytes))) B" } ?? "missing")
+            Text(version.map { "sha \($0.sha) · \(Fmt.grouped(Int64($0.bytes))) B" } ?? (isKnown ? "missing" : "—"))
                 .foregroundStyle(Nocturne.neutral300)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Text(version?.date ?? "—")
@@ -119,8 +122,8 @@ struct ArmNextBootCard: View {
             CardHeader(
                 title: "Arm next boot",
                 note: "bringup_mode.txt",
-                status: store.isArmed ? "armed · \(store.armMode.rawValue)" : "not armed",
-                isStatusHighlighted: store.isArmed
+                status: store.isArmed.map { $0 ? "armed · \(store.armMode.rawValue)" : "not armed" } ?? "—",
+                isStatusHighlighted: store.isArmed == true
             )
             HStack(spacing: 10) {
                 NocturneSegmented(
@@ -135,6 +138,7 @@ struct ArmNextBootCard: View {
                 Spacer(minLength: 0)
                 Button("Arm") { store.arm() }
                     .buttonStyle(.nocturneSecondary)
+                    .disabled(!store.hasDevice)
             }
             Text("Unplug USB, then switch battery on. 5 s countdown, finite action, release. \(Text("Keep battery off while USB is connected.").foregroundStyle(Nocturne.accent300))")
                 .font(.nocturne(11.5))
@@ -154,7 +158,7 @@ struct LegOffsetsCard: View {
             CardHeader(
                 title: "Leg offsets",
                 note: "° from neutral 90 · ±\(Int(LegOffsets.range.upperBound))",
-                status: unsaved > 0 ? "\(unsaved) unsaved" : "saved",
+                status: store.storedOffsets == nil ? "—" : unsaved > 0 ? "\(unsaved) unsaved" : "saved",
                 isStatusHighlighted: unsaved > 0
             )
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
@@ -176,6 +180,7 @@ struct LegOffsetsCard: View {
                     }
                 }
             }
+            .disabled(!store.hasDevice)
             HStack(spacing: 8) {
                 Button("Center") { store.centerLegs() }
                     .buttonStyle(.nocturneSecondary)
@@ -186,14 +191,16 @@ struct LegOffsetsCard: View {
                     .buttonStyle(.nocturnePrimary)
                     .disabled(unsaved == 0)
             }
+            .disabled(!store.hasDevice)
         }
     }
 
     private func pulseLabel(_ side: LegSide) -> Text {
         let pulse = "\(ServoMath.pulseMicros(offsetDegrees: store.offsets[side])) µs · "
-        if store.isUnsaved(side) {
-            let stored = "stored \(Fmt.signed(store.storedOffsets[side]))"
-            return Text("\(pulse)\(Text(stored).foregroundStyle(Nocturne.accent300))")
+        guard let stored = store.storedOffsets else { return Text(pulse + "stored —") }
+        if stored[side] != store.offsets[side] {
+            let label = "stored \(Fmt.signed(stored[side]))"
+            return Text("\(pulse)\(Text(label).foregroundStyle(Nocturne.accent300))")
         }
         return Text(pulse + "saved")
     }
@@ -207,6 +214,12 @@ struct FirmwareConsole: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        if store.consoleLines.isEmpty {
+                            Text("No output")
+                                .font(.nocturneMono(11.5))
+                                .foregroundStyle(Nocturne.neutral600)
+                                .padding(.vertical, 2.5)
+                        }
                         ForEach(store.consoleLines) { line in
                             ConsoleRow(line: line, isRunning: line.kind == .progress && store.isUploading)
                                 .id(line.id)
@@ -222,13 +235,14 @@ struct FirmwareConsole: View {
                 }
             }
             HStack(spacing: 8) {
-                Text("next: mpremote reset · verify idle boot")
+                Text(store.hasDevice ? "next: mpremote reset · verify idle boot" : "no device")
                     .font(.nocturneMono(11))
                     .foregroundStyle(Nocturne.neutral600)
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 Button("Open REPL") { store.openREPL() }
                     .buttonStyle(.nocturneGhost)
+                    .disabled(!store.hasDevice)
             }
             .padding(EdgeInsets(top: 8, leading: 12, bottom: 10, trailing: 12))
         }

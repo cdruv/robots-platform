@@ -11,9 +11,9 @@ struct LiveRobotView: View {
         VStack(spacing: 0) {
             ViewHeader(
                 "Live Robot",
-                subtitle: "camera \(snapshot.camera.fps) fps · mic \(snapshot.mic.sampleRateKHz) kHz · imu \(snapshot.imu.rateHz) Hz"
+                subtitle: "camera \(Fmt.dash(snapshot.camera?.fps)) fps · mic \(Fmt.dash(snapshot.mic?.sampleRateKHz)) kHz · imu \(Fmt.dash(snapshot.imu?.rateHz)) Hz"
             )
-            tiles(store: store, snapshot: snapshot)
+            tiles(store: store, snapshot: snapshot, links: app.connection.links)
                 .opacity(isOnline ? 1 : 0.35)
                 .overlay {
                     if !isOnline {
@@ -30,9 +30,7 @@ struct LiveRobotView: View {
                 if store.isMuted {
                     Text("muted")
                 }
-                TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Text("session \(Self.duration(from: store.sessionStart, to: context.date))")
-                }
+                Text("session —")
                 Spacer()
                 Text("R record · M mute · ⌘1–5 focus a stream")
             }
@@ -40,7 +38,7 @@ struct LiveRobotView: View {
         .background { shortcuts(store: store) }
     }
 
-    private func tiles(store: LiveRobotStore, snapshot: LiveSnapshot) -> some View {
+    private func tiles(store: LiveRobotStore, snapshot: LiveSnapshot, links: RobotLinks) -> some View {
         GeometryReader { geometry in
             let gap: CGFloat = 12
             // Columns are 1.4fr 1fr 1fr.
@@ -59,7 +57,7 @@ struct LiveRobotView: View {
                     }
                     HStack(spacing: gap) {
                         FaceTile(face: snapshot.face, isFocused: store.focusedStream == .face)
-                        SystemTile(system: snapshot.system, isFocused: store.focusedStream == .system)
+                        SystemTile(system: snapshot.system, phone: links.phone, pico: links.pico, isFocused: store.focusedStream == .system)
                     }
                 }
             }
@@ -81,10 +79,5 @@ struct LiveRobotView: View {
         .opacity(0)
         .frame(width: 0, height: 0)
         .accessibilityHidden(true)
-    }
-
-    private static func duration(from start: Date, to end: Date) -> String {
-        let seconds = max(0, Int(end.timeIntervalSince(start)))
-        return String(format: "%02d:%02d:%02d", seconds / 3600, seconds / 60 % 60, seconds % 60)
     }
 }

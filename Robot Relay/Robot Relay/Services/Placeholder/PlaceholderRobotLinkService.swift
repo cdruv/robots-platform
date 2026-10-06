@@ -35,7 +35,7 @@ final class PlaceholderRobotLinkService: RobotLinkService {
     }
 
     func pairController() async {
-        current.controller.isPaired.toggle()
+        current.controller.isPaired = !(current.controller.isPaired ?? false)
         publish()
     }
 
@@ -58,7 +58,8 @@ final class PlaceholderRobotLinkService: RobotLinkService {
                 isArmed: true,
                 railVolts: 5.9,
                 lastWatchdogReset: Date.now.addingTimeInterval(-120)
-            )
+            ),
+            controller: ControllerLink(name: "Xbox", transport: "Bluetooth", isPaired: false)
         )
     }
 }

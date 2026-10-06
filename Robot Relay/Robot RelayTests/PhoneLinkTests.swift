@@ -157,6 +157,7 @@ struct PhoneAddressTests {
     @Test func transportFollowsTheAddress() {
         #expect(PhoneLink(address: "127.0.0.1:7777").transport == "USB · adb")
         #expect(PhoneLink(address: "10.0.0.42:7777").transport == "Wi‑Fi")
+        #expect(PhoneLink().transport == "—")
     }
 }
 

@@ -7,19 +7,19 @@ struct DriveView: View {
     var body: some View {
         let controller = app.connection.links.controller
         VStack(spacing: 0) {
-            ViewHeader("Drive", subtitle: "\(controller.name) controller · manual navigation")
+            ViewHeader("Drive", subtitle: "\(controller.name ?? "—") controller · manual navigation")
             VStack(spacing: 12) {
                 Kicker("Not designed yet")
                 Text("Manual driving and movement visualization will live here.")
                     .font(.nocturne(13))
                     .foregroundStyle(Nocturne.neutral400)
                 HStack(spacing: 8) {
-                    StatusDot(tone: controller.isPaired ? .on : .off)
-                    Text(controller.isPaired ? "controller paired" : "controller not paired")
+                    StatusDot(tone: controller.isPaired == true ? .on : .off)
+                    Text(controller.isPaired.map { $0 ? "controller paired" : "controller not paired" } ?? "controller —")
                         .font(.nocturneMono(11))
                         .foregroundStyle(Nocturne.neutral500)
                 }
-                if !controller.isPaired {
+                if controller.isPaired == false {
                     Button("Pair…") { app.connection.pairController() }
                         .buttonStyle(.nocturneSecondary)
                 }

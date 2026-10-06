@@ -2,7 +2,21 @@ import Foundation
 
 /// Echoes the `mpremote` commands a real implementation would run; nothing is executed.
 final class PlaceholderFirmwareService: FirmwareService {
-    let deviceInfo = FirmwareDeviceInfo()
+    let deviceInfo: FirmwareDeviceInfo? = FirmwareDeviceInfo(
+        board: "Pico 2 W",
+        runtime: "MicroPython 1.28",
+        port: "/dev/tty.usbmodem14201",
+        tool: "mpremote 1.25",
+        toolEnvironment: "~/.venvs/pico",
+        watchdog: "watchdog 2 s · release on idle",
+        lastUpload: "2026‑09‑28 21:14"
+    )
+    let file: FirmwareFile? = FirmwareFile(
+        name: "servo_bringup / main.py",
+        device: .init(sha: "0fe53", bytes: 3402, date: "2026‑09‑28"),
+        local: .init(sha: "34cc7", bytes: 3614, date: "2026‑10‑04")
+    )
+    let storedOffsets: LegOffsets? = LegOffsets(left: -2.0, right: 1.5)
 
     private let stream: AsyncStream<ConsoleLine>
     private let continuation: AsyncStream<ConsoleLine>.Continuation

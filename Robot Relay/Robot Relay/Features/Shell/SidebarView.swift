@@ -28,7 +28,7 @@ struct SidebarView: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(app.connection.links.robotName)
                     .font(.nocturne(14, .medium))
-                Text("pixel‑8 · pico 2 w")
+                Text(app.connection.links.phone.isConnected ? app.connection.links.phone.deviceName : "phone —")
                     .font(.nocturneMono(10.5))
                     .foregroundStyle(Nocturne.neutral600)
             }
@@ -38,15 +38,16 @@ struct SidebarView: View {
     private var stats: some View {
         let links = app.connection.links
         let system = app.live.snapshot.system
+        let rail = links.pico.railVolts.map { String(format: "%.1f V", $0) }
         return VStack(spacing: 6) {
             if links.phone.isConnected {
-                StatRow(label: "Battery", value: "\(system.batteryPercent)%")
-                StatRow(label: "Thermal", value: "\(system.thermal)")
-                StatRow(label: "Servo rail", value: String(format: "%.1f V", system.railVolts))
+                StatRow(label: "Battery", value: system.map { "\($0.batteryPercent)%" })
+                StatRow(label: "Thermal", value: system.map { "\($0.thermal)" })
+                StatRow(label: "Servo rail", value: rail)
             } else {
                 StatRow(label: "Battery", value: nil)
                 StatRow(label: "Pico", value: links.pico.route == .usb ? "usb" : nil)
-                StatRow(label: "Servo rail", value: "off", isMuted: true)
+                StatRow(label: "Servo rail", value: rail)
             }
         }
     }

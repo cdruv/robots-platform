@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct CameraTile: View {
-    let camera: LiveSnapshot.Camera
+    let camera: LiveSnapshot.Camera?
     let isRecording: Bool
     let isFocused: Bool
     let onSnapshot: () -> Void
@@ -12,7 +12,7 @@ struct CameraTile: View {
         VStack(spacing: 0) {
             GeometryReader { geometry in
                 // Video is not streamed yet; this frame marks where it will render.
-                Text("LIVE FRAME · PLACEHOLDER")
+                Text(camera == nil ? "NO VIDEO" : "LIVE FRAME · PLACEHOLDER")
                     .font(.nocturne(11))
                     .tracking(0.9)
                     .foregroundStyle(Nocturne.neutral600)
@@ -21,7 +21,7 @@ struct CameraTile: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             HStack(spacing: 8) {
-                Text("motion \(String(format: "%.2f", camera.motion)) · brightness \(String(format: "%.2f", camera.brightness)) · frame \(Fmt.grouped(camera.frame))")
+                Text(Self.stats(camera))
                     .font(.nocturneMono(11))
                     .foregroundStyle(Nocturne.neutral500)
                     .lineLimit(1)
@@ -40,7 +40,7 @@ struct CameraTile: View {
             .padding(EdgeInsets(top: 0, leading: 12, bottom: 10, trailing: 12))
         }
         .overlay(alignment: .top) {
-            TileCaption(caption: "Camera", value: "\(camera.fps) fps · \(camera.width)×\(camera.height)")
+            TileCaption(caption: "Camera", value: camera.map { "\($0.fps) fps · \($0.width)×\($0.height)" } ?? "—")
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -54,23 +54,32 @@ struct CameraTile: View {
         .clipShape(shape)
         .overlay(shape.strokeBorder(isFocused ? Nocturne.accent600 : Nocturne.neutral900, lineWidth: 1))
     }
+
+    private static func stats(_ camera: LiveSnapshot.Camera?) -> String {
+        guard let camera else { return "motion — · brightness — · frame —" }
+        return "motion \(String(format: "%.2f", camera.motion)) · brightness \(String(format: "%.2f", camera.brightness)) · frame \(Fmt.grouped(camera.frame))"
+    }
 }
 
 struct MicrophoneTile: View {
-    let mic: LiveSnapshot.Microphone
+    let mic: LiveSnapshot.Microphone?
     let isMuted: Bool
     let isFocused: Bool
+
+    /// Bars shown flat when there is no data.
+    private static let barCount = 16
 
     var body: some View {
         Tile(
             caption: "Microphone",
-            value: isMuted ? "muted" : "\(Fmt.signed(mic.levelDb, decimals: 0).replacingOccurrences(of: "+", with: "")) dB",
+            value: isMuted ? "muted" : mic.map { "\(Fmt.signed($0.levelDb, decimals: 0).replacingOccurrences(of: "+", with: "")) dB" } ?? "—",
             isFocused: isFocused
         ) {
+            let bars = mic?.bars ?? Array(repeating: 0, count: Self.barCount)
             GeometryReader { geometry in
                 HStack(alignment: .center, spacing: 2) {
-                    ForEach(mic.bars.indices, id: \.self) { index in
-                        let level = isMuted ? 0.04 : mic.bars[index]
+                    ForEach(bars.indices, id: \.self) { index in
+                        let level = isMuted ? 0.04 : bars[index]
                         Rectangle()
                             .fill(Self.color(for: level))
                             .frame(height: max(1, geometry.size.height * level))
@@ -81,7 +90,9 @@ struct MicrophoneTile: View {
             .padding(EdgeInsets(top: 8, leading: 12, bottom: 0, trailing: 12))
 
             Group {
-                if let transcript = mic.transcript {
+                if mic == nil {
+                    Text("—").foregroundStyle(Nocturne.neutral600)
+                } else if let transcript = mic?.transcript {
                     Text("“\(transcript.text)” \(Text("\(transcript.isFinal ? "final" : "partial") · \(String(format: "%.2f", transcript.confidence))").font(.nocturneMono(10)).foregroundStyle(Nocturne.neutral600))")
                 } else {
                     Text(" ")
@@ -106,19 +117,19 @@ struct MicrophoneTile: View {
 }
 
 struct AttitudeTile: View {
-    let imu: LiveSnapshot.IMU
+    let imu: LiveSnapshot.IMU?
     let isFocused: Bool
 
     var body: some View {
-        Tile(caption: "Attitude", value: "\(imu.rateHz) Hz", isFocused: isFocused) {
+        Tile(caption: "Attitude", value: "\(Fmt.dash(imu?.rateHz)) Hz", isFocused: isFocused) {
             HStack(spacing: 14) {
-                AttitudeDial(pitch: imu.pitch, roll: imu.roll)
+                AttitudeDial(attitude: imu.map { ($0.pitch, $0.roll) })
                 VStack(alignment: .leading, spacing: 6) {
-                    LabeledValue(label: "pitch", value: Fmt.signed(imu.pitch) + "°")
-                    LabeledValue(label: "roll", value: Fmt.signed(imu.roll) + "°")
-                    LabeledValue(label: "|a|", value: String(format: "%.2f", imu.accel), unit: "m/s²")
-                    Text(imu.motionState)
-                        .foregroundStyle(Nocturne.accent300)
+                    LabeledValue(label: "pitch", value: imu.map { Fmt.signed($0.pitch) + "°" } ?? "—")
+                    LabeledValue(label: "roll", value: imu.map { Fmt.signed($0.roll) + "°" } ?? "—")
+                    LabeledValue(label: "|a|", value: imu.map { String(format: "%.2f", $0.accel) } ?? "—", unit: "m/s²")
+                    Text(imu?.motionState ?? "—")
+                        .foregroundStyle(imu == nil ? Nocturne.neutral600 : Nocturne.accent300)
                 }
                 .font(.nocturneMono(12))
                 .foregroundStyle(Nocturne.neutral400)
@@ -129,10 +140,10 @@ struct AttitudeTile: View {
     }
 }
 
-/// Artificial horizon: the line rotates with roll and shifts with pitch.
+/// Artificial horizon: the line rotates with roll and shifts with pitch. Without data
+/// only the dial is drawn.
 struct AttitudeDial: View {
-    let pitch: Double
-    let roll: Double
+    let attitude: (pitch: Double, roll: Double)?
 
     var body: some View {
         Canvas { context, _ in
@@ -150,10 +161,11 @@ struct AttitudeDial: View {
             ticks.addLine(to: CGPoint(x: 72, y: 38))
             context.stroke(ticks, with: .color(Nocturne.neutral700), lineWidth: 1)
 
+            guard let attitude else { return }
             var horizon = context
             horizon.translateBy(x: 38, y: 38)
-            horizon.rotate(by: .degrees(roll))
-            horizon.translateBy(x: 0, y: -pitch * 1.4)
+            horizon.rotate(by: .degrees(attitude.roll))
+            horizon.translateBy(x: 0, y: -attitude.pitch * 1.4)
             var line = Path()
             line.move(to: CGPoint(x: -26, y: 0))
             line.addLine(to: CGPoint(x: 26, y: 0))
@@ -165,17 +177,18 @@ struct AttitudeDial: View {
 }
 
 struct FaceTile: View {
-    let face: LiveSnapshot.Face
+    let face: LiveSnapshot.Face?
     let isFocused: Bool
 
     var body: some View {
-        Tile(caption: "Face", value: face.expression, isFocused: isFocused) {
+        Tile(caption: "Face", value: face?.expression ?? "—", isFocused: isFocused) {
             HStack(spacing: 14) {
                 RobotFace(size: .large)
+                    .opacity(face == nil ? 0.35 : 1)
                 VStack(alignment: .leading, spacing: 4) {
-                    LabeledValue(label: "Expression", value: face.expression)
-                    LabeledValue(label: "Speech", value: face.speech)
-                    Text("last: \(face.lastEvent)")
+                    LabeledValue(label: "Expression", value: face?.expression ?? "—")
+                    LabeledValue(label: "Speech", value: face?.speech ?? "—")
+                    Text("last: \(face?.lastEvent ?? "—")")
                         .font(.nocturneMono(11))
                         .foregroundStyle(Nocturne.neutral600)
                         .lineLimit(1)
@@ -189,24 +202,28 @@ struct FaceTile: View {
     }
 }
 
+/// Phone battery and thermal from the live stream; device, link and Pico from the links.
 struct SystemTile: View {
-    let system: LiveSnapshot.System
+    let system: LiveSnapshot.System?
+    let phone: PhoneLink
+    let pico: PicoLink
     let isFocused: Bool
 
     var body: some View {
-        Tile(caption: "System", value: system.deviceName, isFocused: isFocused) {
+        let isConnected = phone.isConnected
+        Tile(caption: "System", value: phone.deviceName, isFocused: isFocused) {
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
                 GridRow {
-                    LabeledValue(label: "battery", value: "\(system.batteryPercent)%")
-                    LabeledValue(label: "thermal", value: "\(system.thermal)")
+                    LabeledValue(label: "battery", value: system.map { "\($0.batteryPercent)%" } ?? "—")
+                    LabeledValue(label: "thermal", value: Fmt.dash(system?.thermal))
                 }
                 GridRow {
-                    LabeledValue(label: "link", value: "\(system.linkMs) ms")
-                    LabeledValue(label: "dropped", value: "\(system.dropped)")
+                    LabeledValue(label: "link", value: isConnected ? phone.rttMs.map { "\($0) ms" } ?? "—" : "—")
+                    LabeledValue(label: "dropped", value: isConnected ? "\(phone.dropped)" : "—")
                 }
                 GridRow {
-                    LabeledValue(label: "servo rail", value: String(format: "%.1f V", system.railVolts))
-                    LabeledValue(label: "pico", value: system.picoArmed ? "armed" : "released")
+                    LabeledValue(label: "servo rail", value: pico.railVolts.map { String(format: "%.1f V", $0) } ?? "—")
+                    LabeledValue(label: "pico", value: pico.route == nil || pico.route == .offline ? "—" : pico.isArmed ? "armed" : "released")
                 }
             }
             .font(.nocturneMono(12))

@@ -16,13 +16,13 @@ nonisolated struct FirmwareFile: Equatable, Sendable {
 
 /// The Pico and the toolchain used to reach it.
 nonisolated struct FirmwareDeviceInfo: Equatable, Sendable {
-    var board = "Pico 2 W"
-    var runtime = "MicroPython 1.28"
-    var port = "/dev/tty.usbmodem14201"
-    var tool = "mpremote 1.25"
-    var toolEnvironment = "~/.venvs/pico"
-    var watchdog = "watchdog 2 s · release on idle"
-    var lastUpload = "2026‑09‑28 21:14"
+    var board: String
+    var runtime: String
+    var port: String
+    var tool: String
+    var toolEnvironment: String
+    var watchdog: String
+    var lastUpload: String
 }
 
 /// Action `bringup_mode.txt` arms for the next battery boot.

@@ -66,13 +66,13 @@ struct ConnectionPopover: View {
                 let rtt = phone.rttMs.map { "\($0) ms" } ?? "—"
                 Text("\(Text(phone.address).foregroundStyle(Nocturne.neutral200)) · RTT \(rtt)\n\(phone.eventsPerSecond) ev/s · \(phone.dropped) dropped")
             case .connecting:
-                Text("\(phone.address)\nConnecting…")
+                Text("\(Self.dash(phone.address))\nConnecting…")
             case .retrying(let date):
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    Text("\(phone.address)\nRetrying in \(ConnectionStore.secondsUntil(date)) s")
+                    Text("\(Self.dash(phone.address))\nRetrying in \(ConnectionStore.secondsUntil(date)) s")
                 }
             case .disconnected:
-                Text("\(phone.address)\nNot connected")
+                Text("\(Self.dash(phone.address))\nNot connected")
             }
         } action: {
             Button(isIdle ? "Connect" : "Disconnect") { app.connection.togglePhone() }
@@ -80,14 +80,26 @@ struct ConnectionPopover: View {
         }
     }
 
+    private static func dash(_ text: String) -> String {
+        text.isEmpty ? "—" : text
+    }
+
     private func picoRow(_ pico: PicoLink) -> some View {
-        let rail = pico.railVolts.map { String(format: "servo rail %.1f V", $0) } ?? "servo rail off"
+        let rail = pico.railVolts.map { String(format: "servo rail %.1f V", $0) } ?? "servo rail —"
+        let meta = switch pico.route {
+        case .viaPhone: "via phone · Wi‑Fi"
+        case .usb: "USB · mpremote"
+        case .offline: "offline"
+        case nil: "—"
+        }
         return LinkRow(
             name: "Pico 2 W",
             tone: pico.route == .viaPhone ? .warning : pico.route == .usb ? .idle : .off,
-            meta: pico.route == .viaPhone ? "via phone · Wi‑Fi" : pico.route == .usb ? "USB · mpremote" : "offline"
+            meta: meta
         ) {
-            if pico.route == .offline {
+            if pico.route == nil {
+                Text("No data")
+            } else if pico.route == .offline {
                 Text("Not connected")
             } else {
                 let state = Text(pico.isArmed ? "armed" : "released").foregroundStyle(Nocturne.neutral200)
@@ -105,15 +117,17 @@ struct ConnectionPopover: View {
     }
 
     private func controllerRow(_ controller: ControllerLink) -> some View {
-        LinkRow(
+        let isPaired = controller.isPaired == true
+        return LinkRow(
             name: "Controller",
-            tone: controller.isPaired ? .on : .off,
-            meta: "\(controller.name) · \(controller.transport)"
+            tone: isPaired ? .on : .off,
+            meta: "\(controller.name ?? "—") · \(controller.transport ?? "—")"
         ) {
-            Text(controller.isPaired ? "Paired" : "Not paired")
+            Text(controller.isPaired.map { $0 ? "Paired" : "Not paired" } ?? "No data")
         } action: {
-            Button(controller.isPaired ? "Unpair" : "Pair…") { app.connection.pairController() }
-                .buttonStyle(controller.isPaired ? .nocturneGhost : .nocturneSecondary)
+            Button(isPaired ? "Unpair" : "Pair…") { app.connection.pairController() }
+                .buttonStyle(isPaired ? .nocturneGhost : .nocturneSecondary)
+                .disabled(controller.isPaired == nil)
         }
     }
 }

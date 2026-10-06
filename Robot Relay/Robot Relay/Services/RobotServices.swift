@@ -20,14 +20,15 @@ struct RobotServices {
         )
     }
 
-    /// The phone link and its telemetry are real; the rest is still canned.
+    /// The phone link and its telemetry are real. Everything else reports no data, so the UI
+    /// shows dashes instead of canned values.
     static func live() -> RobotServices {
         let phone = PhoneConnection()
         return RobotServices(
             link: PhoneLinkService(connection: phone),
             telemetry: PhoneTelemetryService(connection: phone),
-            live: PlaceholderLiveStreamService(),
-            firmware: PlaceholderFirmwareService(),
+            live: UnavailableLiveStreamService(),
+            firmware: UnavailableFirmwareService(),
             drive: PlaceholderDriveService()
         )
     }
@@ -64,7 +65,12 @@ protocol LiveStreamService: AnyObject {
 
 /// Pico firmware management over `mpremote`: upload, arming, calibration.
 protocol FirmwareService: AnyObject {
-    var deviceInfo: FirmwareDeviceInfo { get }
+    /// nil when no Pico is reachable; the Firmware view then shows no data and disables its actions.
+    var deviceInfo: FirmwareDeviceInfo? { get }
+    /// The firmware file, with the device copy and the local copy.
+    var file: FirmwareFile? { get }
+    /// Offsets currently stored on the device.
+    var storedOffsets: LegOffsets? { get }
     /// Console output. A line re-sent with the same `id` replaces the earlier one. Single consumer.
     func console() -> AsyncStream<ConsoleLine>
     /// Copies the local file to the device, yielding progress 0…1.
