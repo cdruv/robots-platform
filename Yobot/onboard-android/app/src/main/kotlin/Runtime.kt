@@ -1,6 +1,7 @@
 package com.vadymsidorov.yobot
 
 import android.content.Context
+import android.os.Build
 import com.vadymsidorov.yobot.core.events.Percept
 import com.vadymsidorov.yobot.core.inference.Inference
 import com.vadymsidorov.yobot.core.reflex.MotionReflex
@@ -73,10 +74,18 @@ class Runtime(context: Context) {
         session.scope.cancel()
     }
 
+    private fun versionName(): String? =
+        runCatching { app.packageManager.getPackageInfo(app.packageName, 0).versionName }.getOrNull()
+
     private inner class Session {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default +
             CoroutineExceptionHandler { _, e -> android.util.Log.e("Yobot", "session failure", e) })
-        val server = TcpServerSink()
+        val server = TcpServerSink(hello = {
+            buildJsonObject {
+                put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
+                put("app", versionName())
+            }
+        })
         val telemetry = DefaultTelemetry(listOf(LogcatSink(), server, recentEvents), scope)
         val hearing = HearingSense(app, telemetry.logger("hearing"))
         val imu = ImuSense(app, telemetry.logger("imu"))

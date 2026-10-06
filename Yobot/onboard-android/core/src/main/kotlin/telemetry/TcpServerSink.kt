@@ -3,13 +3,22 @@ package com.vadymsidorov.yobot.core.telemetry
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
+import java.io.BufferedInputStream
 import java.io.BufferedWriter
+import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.OutputStreamWriter
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
@@ -28,11 +37,17 @@ data class TcpServerStatus(
  * then `nc localhost 7777` on the workstation, or `nc <phone-ip> 7777` over Wi-Fi.
  * New clients first receive the last [replayEvents] events. Each client has a bounded
  * line queue; a client that cannot keep up loses lines, which are counted as drops.
+ *
+ * Lines that concern one client only carry a `link` key and no `seq`: each client first
+ * gets `{"link":"hello","protocol":1,…,"session":"<uuid>","port":7777}` (fields from [hello]),
+ * and a client line `{"ping":n}` is answered with `{"link":"pong","ping":n}`, queued behind
+ * pending telemetry. `Robot Relay/scripts/relay-phone.sh` wraps all of this for the terminal.
  */
 class TcpServerSink(
     private val port: Int = DEFAULT_PORT,
     private val replayEvents: Int = 200,
     private val clientQueueLines: Int = 4096,
+    private val hello: () -> JsonObject = { buildJsonObject {} },
 ) : TelemetrySink {
     override val name = "tcp"
 
@@ -44,6 +59,7 @@ class TcpServerSink(
     private val clients = CopyOnWriteArrayList<Client>()
     private var server: ServerSocket? = null
     @Volatile private var closed = false
+    private val session = UUID.randomUUID().toString()
 
     /** Binds the listening socket. Called lazily by [write]; safe to call early. */
     @Synchronized
@@ -94,12 +110,24 @@ class TcpServerSink(
                     return
                 }
                 val client = Client(connection)
+                client.offer(listOf(helloLine()))
                 client.offer(synchronized(replay) { replay.toList() })
                 clients += client
                 client.start()
                 publish()
             }
         }
+    }
+
+    private fun helloLine(): String {
+        val fields = runCatching(hello).getOrDefault(JsonObject(emptyMap()))
+        return buildJsonObject {
+            put("link", "hello")
+            put("protocol", PROTOCOL)
+            fields.forEach { (key, value) -> put(key, value) }
+            put("session", session)
+            put("port", server?.localPort)
+        }.toString()
     }
 
     private fun publish(error: String? = null) {
@@ -152,19 +180,48 @@ class TcpServerSink(
             }
         }
 
-        /** Clients send nothing; a read returning EOF is the fastest disconnect signal. */
+        /**
+         * Answers `{"ping":n}` lines and ignores anything else, including lines over
+         * [MAX_CLIENT_LINE_BYTES]. A read returning EOF is the fastest disconnect signal.
+         */
         private fun readUntilClosed() {
             try {
-                val input = socket.getInputStream()
-                while (input.read() >= 0) Unit
+                val input = BufferedInputStream(socket.getInputStream())
+                val line = ByteArrayOutputStream(MAX_CLIENT_LINE_BYTES)
+                var oversized = false
+                while (true) {
+                    val byte = input.read()
+                    if (byte < 0) break
+                    if (byte == '\n'.code) {
+                        if (!oversized) answer(line.toString(Charsets.UTF_8.name()))
+                        line.reset()
+                        oversized = false
+                    } else if (line.size() < MAX_CLIENT_LINE_BYTES) {
+                        line.write(byte)
+                    } else {
+                        oversized = true
+                    }
+                }
             } catch (_: IOException) {
             }
             close()
+        }
+
+        private fun answer(line: String) {
+            val ping = runCatching {
+                (YobotJson.parseToJsonElement(line).jsonObject["ping"] as? JsonPrimitive)?.longOrNull
+            }.getOrNull() ?: return
+            queue.offer(buildJsonObject {
+                put("link", "pong")
+                put("ping", ping)
+            }.toString())
         }
     }
 
     companion object {
         const val DEFAULT_PORT = 7777
+        const val PROTOCOL = 1
+        const val MAX_CLIENT_LINE_BYTES = 1024
 
         /** Non-loopback IPv4 addresses of interfaces that are up, e.g. the Wi-Fi address. */
         fun localAddresses(): List<String> = try {

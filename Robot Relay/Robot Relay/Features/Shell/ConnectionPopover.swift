@@ -36,10 +36,15 @@ struct ConnectionPopover: View {
                     .background(Nocturne.surface, in: RoundedRectangle(cornerRadius: Nocturne.Radius.md))
                     .overlay(
                         RoundedRectangle(cornerRadius: Nocturne.Radius.md)
-                            .strokeBorder(Nocturne.divider, lineWidth: 1)
+                            .strokeBorder(connection.isAddressInvalid ? Nocturne.accent300 : Nocturne.divider, lineWidth: 1)
                     )
+                    .onSubmit { connection.togglePhone() }
                 Button("adb forward") { connection.adbForward() }
                     .buttonStyle(.nocturneSecondary)
+            }
+
+            if !links.activity.isEmpty {
+                ActivityFooter(entries: links.activity)
             }
         }
         .padding(16)
@@ -50,19 +55,28 @@ struct ConnectionPopover: View {
     }
 
     private func phoneRow(_ phone: PhoneLink) -> some View {
-        LinkRow(
+        let isIdle = phone.state == .disconnected
+        return LinkRow(
             name: "Phone app",
-            tone: phone.isConnected ? .on : .off,
+            tone: phone.isConnected ? .on : isIdle ? .off : .idle,
             meta: "\(phone.deviceName) · \(phone.transport)"
         ) {
-            if phone.isConnected {
-                Text("\(Text(phone.address).foregroundStyle(Nocturne.neutral200)) · RTT \(phone.rttMs) ms\n\(phone.eventsPerSecond) ev/s · \(phone.dropped) dropped")
-            } else {
+            switch phone.state {
+            case .connected:
+                let rtt = phone.rttMs.map { "\($0) ms" } ?? "—"
+                Text("\(Text(phone.address).foregroundStyle(Nocturne.neutral200)) · RTT \(rtt)\n\(phone.eventsPerSecond) ev/s · \(phone.dropped) dropped")
+            case .connecting:
+                Text("\(phone.address)\nConnecting…")
+            case .retrying(let date):
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    Text("\(phone.address)\nRetrying in \(ConnectionStore.secondsUntil(date)) s")
+                }
+            case .disconnected:
                 Text("\(phone.address)\nNot connected")
             }
         } action: {
-            Button(phone.isConnected ? "Disconnect" : "Connect") { app.connection.togglePhone() }
-                .buttonStyle(phone.isConnected ? .nocturneGhost : .nocturneSecondary)
+            Button(isIdle ? "Connect" : "Disconnect") { app.connection.togglePhone() }
+                .buttonStyle(isIdle ? .nocturneSecondary : .nocturneGhost)
         }
     }
 
@@ -100,6 +114,39 @@ struct ConnectionPopover: View {
         } action: {
             Button(controller.isPaired ? "Unpair" : "Pair…") { app.connection.pairController() }
                 .buttonStyle(controller.isPaired ? .nocturneGhost : .nocturneSecondary)
+        }
+    }
+}
+
+/// What the app just did, as the commands you would type to do it yourself
+/// (`scripts/relay-phone.sh` runs the same ones). Selectable for copying.
+private struct ActivityFooter: View {
+    let entries: [LinkActivity]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(entries) { entry in
+                line(entry)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .font(.nocturneMono(10.5))
+        .foregroundStyle(Nocturne.neutral600)
+        .textSelection(.enabled)
+    }
+
+    private func line(_ entry: LinkActivity) -> Text {
+        switch entry.state {
+        case .running:
+            Text("\(entry.text)…").foregroundStyle(Nocturne.neutral500)
+        case .ok(nil):
+            Text(entry.text)
+        case .ok(let detail?):
+            Text("\(entry.text)  · \(detail)")
+        case .failed(let detail):
+            Text("\(entry.text)  · \(Text(detail).foregroundStyle(Nocturne.accent300))")
         }
     }
 }

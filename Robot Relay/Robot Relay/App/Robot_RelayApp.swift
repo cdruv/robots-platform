@@ -9,7 +9,7 @@ import SwiftUI
 
 @main
 struct Robot_RelayApp: App {
-    @State private var app = AppModel(services: .placeholder())
+    @State private var app = AppModel(services: .live())
 
     var body: some Scene {
         WindowGroup {

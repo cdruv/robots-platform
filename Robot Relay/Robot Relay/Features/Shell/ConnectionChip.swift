@@ -22,9 +22,12 @@ struct ConnectionChip: View {
                         .font(.nocturne(12, .medium))
                         .foregroundStyle(Nocturne.neutral200)
                 }
-                Text(summary.detail)
-                    .font(.nocturneMono(11))
-                    .foregroundStyle(Nocturne.neutral500)
+                // Ticks so "retry Ns" counts down.
+                TimelineView(.periodic(from: .now, by: 1)) { _ in
+                    Text(app.connection.summary.detail)
+                        .font(.nocturneMono(11))
+                        .foregroundStyle(Nocturne.neutral500)
+                }
                 if app.isConnectionPopoverPresented {
                     Text("▴")
                         .font(.nocturneMono(11))

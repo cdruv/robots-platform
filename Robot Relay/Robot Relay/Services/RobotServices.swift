@@ -19,6 +19,18 @@ struct RobotServices {
             drive: PlaceholderDriveService()
         )
     }
+
+    /// The phone link and its telemetry are real; the rest is still canned.
+    static func live() -> RobotServices {
+        let phone = PhoneConnection()
+        return RobotServices(
+            link: PhoneLinkService(connection: phone),
+            telemetry: PhoneTelemetryService(connection: phone),
+            live: PlaceholderLiveStreamService(),
+            firmware: PlaceholderFirmwareService(),
+            drive: PlaceholderDriveService()
+        )
+    }
 }
 
 /// Owns the links to the phone app, the Pico and the game controller.

@@ -125,6 +125,8 @@ final class TelemetryStore {
     // MARK: Private
 
     private func ingest(_ event: TelemetryEvent) {
+        // seq restarts with every phone session; ids must stay unique.
+        if let last = events.last?.seq, event.seq <= last { reset() }
         if originMonoNs == nil { originMonoNs = event.tsMonoNs }
         events.append(event)
         if passesFilter(event) { visibleEvents.append(event) }
@@ -135,6 +137,14 @@ final class TelemetryStore {
             }
         }
         if !followLive { behindCount += 1 }
+    }
+
+    private func reset() {
+        events = []
+        visibleEvents = []
+        originMonoNs = nil
+        selectedSeq = nil
+        behindCount = 0
     }
 
     private func passesFilter(_ event: TelemetryEvent) -> Bool {
