@@ -1,23 +1,28 @@
 import Foundation
 
 /// The phone row for real: TCP to onboard-android, optionally through `adb forward`.
-/// Pico and controller stay offline until their transports exist.
-/// Terminal equivalent: `scripts/relay-phone.sh`.
+/// The Pico over USB via mpremote (`PicoUSBLink`). The controller stays offline until its
+/// transport exists. Terminal equivalents: `scripts/relay-phone.sh`, `scripts/relay-pico.sh`.
 final class PhoneLinkService: RobotLinkService {
     private var current = RobotLinks()
     private let stream: AsyncStream<RobotLinks>
     private let continuation: AsyncStream<RobotLinks>.Continuation
     private let connection: PhoneConnection
     private let runner: CommandRunner
+    private let pico: PicoUSBLink
 
-    init(connection: PhoneConnection, runner: CommandRunner = CommandRunner()) {
+    /// `pico` should share `runner`, so its mpremote commands reach the activity footer.
+    init(connection: PhoneConnection, runner: CommandRunner, pico: PicoUSBLink) {
         self.connection = connection
         self.runner = runner
+        self.pico = pico
         (stream, continuation) = AsyncStream.makeStream(of: RobotLinks.self, bufferingPolicy: .bufferingNewest(1))
         continuation.yield(current)
         connection.onStatus = { [weak self] status in self?.apply(status) }
         connection.onActivity = { [weak self] entry in self?.record(entry) }
         runner.report = { [weak self] entry in self?.record(entry) }
+        pico.onChange = { [weak self] link in self?.apply(link) }
+        pico.start()
     }
 
     func links() -> AsyncStream<RobotLinks> { stream }
@@ -34,7 +39,9 @@ final class PhoneLinkService: RobotLinkService {
         connection.disconnect()
     }
 
-    func releasePico() async {}
+    func releasePico() async {
+        await pico.disarm()
+    }
 
     func pairController() async {}
 
@@ -65,6 +72,12 @@ final class PhoneLinkService: RobotLinkService {
         phone.dropped = status.dropped
         guard phone != current.phone else { return }
         current.phone = phone
+        continuation.yield(current)
+    }
+
+    private func apply(_ link: PicoLink) {
+        guard link != current.pico else { return }
+        current.pico = link
         continuation.yield(current)
     }
 

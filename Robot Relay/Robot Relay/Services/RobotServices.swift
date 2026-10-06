@@ -20,12 +20,13 @@ struct RobotServices {
         )
     }
 
-    /// The phone link and its telemetry are real. Everything else reports no data, so the UI
-    /// shows dashes instead of canned values.
+    /// The phone link, its telemetry and the Pico over USB are real. Everything else reports
+    /// no data, so the UI shows dashes instead of canned values.
     static func live() -> RobotServices {
         let phone = PhoneConnection()
+        let runner = CommandRunner()
         return RobotServices(
-            link: PhoneLinkService(connection: phone),
+            link: PhoneLinkService(connection: phone, runner: runner, pico: PicoUSBLink(runner: runner)),
             telemetry: PhoneTelemetryService(connection: phone),
             live: UnavailableLiveStreamService(),
             firmware: UnavailableFirmwareService(),
@@ -40,7 +41,8 @@ protocol RobotLinkService: AnyObject {
     func links() -> AsyncStream<RobotLinks>
     func connectPhone(address: String) async
     func disconnectPhone() async
-    /// Releases the servos (stops driving the PWM lines).
+    /// Over USB this disarms: deletes `bringup_mode.txt` so the next battery boot does nothing.
+    /// No remote stop exists; removing power is the immediate stop.
     func releasePico() async
     func pairController() async
     /// Runs `adb forward` so the phone's telemetry port is reachable on localhost.

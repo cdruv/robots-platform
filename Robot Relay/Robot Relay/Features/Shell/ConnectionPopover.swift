@@ -82,16 +82,17 @@ struct ConnectionPopover: View {
     }
 
     private func picoRow(_ pico: PicoLink) -> some View {
-        let rail = pico.railVolts.map { String(format: "servo rail %.1f V", $0) } ?? "servo rail —"
+        let rail = pico.railVolts.map { String(format: "servo rail %.1f V", $0) } ?? "rail not measured"
         let meta = switch pico.route {
         case .viaPhone: "via phone · Wi‑Fi"
         case .usb: "USB · mpremote"
         case .offline: "offline"
         case nil: "—"
         }
+        let isUSB = pico.route == .usb
         return LinkRow(
             name: "Pico 2 W",
-            tone: pico.route == .viaPhone ? .warning : pico.route == .usb ? .idle : .off,
+            tone: pico.route == .viaPhone ? .warning : isUSB ? .idle : .off,
             meta: meta
         ) {
             if pico.route == nil {
@@ -99,17 +100,18 @@ struct ConnectionPopover: View {
             } else if pico.route == .offline {
                 Text("Not connected")
             } else {
-                let state = Text(pico.isArmed ? "armed" : "released").foregroundStyle(Nocturne.neutral200)
+                let state = Text(pico.arm?.label ?? "mode —").foregroundStyle(Nocturne.neutral200)
                 if let reset = pico.lastWatchdogReset {
                     Text("\(state) · \(rail)\n\(Text("watchdog reset \(Fmt.ago(reset))").foregroundStyle(Nocturne.accent300))")
                 } else {
-                    Text("\(state) · \(rail)")
+                    Text("\(state) · \(rail)\nreset cause unknown")
                 }
             }
         } action: {
-            Button("Release") { app.connection.releasePico() }
+            // Over USB, Disarm deletes bringup_mode.txt. No remote stop exists for the other routes.
+            Button(isUSB ? "Disarm" : "Release") { app.connection.releasePico() }
                 .buttonStyle(.nocturneGhost)
-                .disabled(!pico.isArmed)
+                .disabled(!isUSB || pico.arm?.isArmed != true)
         }
     }
 
@@ -130,7 +132,7 @@ struct ConnectionPopover: View {
 }
 
 /// What the app just did, as the commands you would type to do it yourself
-/// (`scripts/relay-phone.sh` runs the same ones). Selectable for copying.
+/// (`scripts/relay-phone.sh` and `scripts/relay-pico.sh` run the same ones). Selectable for copying.
 private struct ActivityFooter: View {
     let entries: [LinkActivity]
 
