@@ -87,11 +87,15 @@ struct NocturneSegmented<Value: Hashable>: View {
             ForEach(options.indices, id: \.self) { index in
                 let option = options[index]
                 if index > 0 {
-                    Rectangle().fill(Nocturne.divider).frame(width: 1)
+                    // Hide dividers next to the selected segment so its accent border isn't doubled.
+                    let touchesSelection = options[index - 1].value == selection || option.value == selection
+                    Rectangle().fill(touchesSelection ? .clear : Nocturne.divider).frame(width: 1)
                 }
                 Segment(
                     label: option.label,
                     isSelected: option.value == selection,
+                    isFirst: index == 0,
+                    isLast: index == options.count - 1,
                     fontSize: fontSize,
                     padding: EdgeInsets(
                         top: verticalPadding, leading: horizontalPadding,
@@ -103,13 +107,16 @@ struct NocturneSegmented<Value: Hashable>: View {
             }
         }
         .fixedSize()
+        // Border sits behind the segments so the selected segment's accent border draws on top of it.
+        .background(RoundedRectangle(cornerRadius: Nocturne.Radius.md).strokeBorder(Nocturne.divider, lineWidth: 1))
         .clipShape(RoundedRectangle(cornerRadius: Nocturne.Radius.md))
-        .overlay(RoundedRectangle(cornerRadius: Nocturne.Radius.md).strokeBorder(Nocturne.divider, lineWidth: 1))
     }
 
     private struct Segment: View {
         let label: String
         let isSelected: Bool
+        let isFirst: Bool
+        let isLast: Bool
         let fontSize: CGFloat
         let padding: EdgeInsets
         let action: () -> Void
@@ -123,11 +130,22 @@ struct NocturneSegmented<Value: Hashable>: View {
                     .foregroundStyle(isSelected ? Nocturne.accent : Nocturne.text)
                     .padding(padding)
                     .background(isHovering && !isSelected ? Nocturne.text.opacity(0.07) : .clear)
-                    .overlay(Rectangle().strokeBorder(isSelected ? Nocturne.accent : .clear, lineWidth: 1))
+                    .overlay(shape.strokeBorder(isSelected ? Nocturne.accent : .clear, lineWidth: 1))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .onHover { isHovering = $0 }
+        }
+
+        /// Rounds only the outer corners so the selection border follows the control's outline.
+        private var shape: UnevenRoundedRectangle {
+            let radius = Nocturne.Radius.md
+            return UnevenRoundedRectangle(
+                topLeadingRadius: isFirst ? radius : 0,
+                bottomLeadingRadius: isFirst ? radius : 0,
+                bottomTrailingRadius: isLast ? radius : 0,
+                topTrailingRadius: isLast ? radius : 0
+            )
         }
     }
 }

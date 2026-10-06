@@ -2,7 +2,6 @@ import Foundation
 import Network
 
 /// The TCP link to onboard-android's telemetry server (`TcpServerSink`, NDJSON on :7777).
-/// The terminal equivalent is `scripts/relay-phone.sh tail` / `ping`.
 ///
 /// Reconnects with a 1, 2, 4, then 5 s backoff while the user wants to be connected. Each
 /// connection starts with a hello line and a replay of recent events; replayed events already
