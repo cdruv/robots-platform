@@ -9,3 +9,5 @@ Custom robot control terminal for macOS. It is used to stream telemetry (logs), 
 - The Pico 2 W is found over USB by IOKit (vendor 0x2E8A). Its armed mode (`bringup_mode.txt`) is read with `mpremote exec` only on connect and after Arm or Disarm, because every mpremote call interrupts the board and takes the serial port. Relay never runs `mpremote reset`.
 
 Install with `scripts/install_local.sh` (Release build into `/Applications`), or open `Robot Relay.xcodeproj`.
+
+Versioning: bump major.minor by hand in `MARKETING_VERSION` (target › General › Version). The build number (`CFBundleVersion`) is the build time, YYYYMMDD.HHMM, stamped by the target's "Stamp Build Number" phase on every build, from Xcode and `install_local.sh` alike. Read both through `AppVersion`.

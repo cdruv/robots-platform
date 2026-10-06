@@ -96,6 +96,7 @@
 				756FD4353073071200B6C0A9 /* Sources */,
 				756FD4363073071200B6C0A9 /* Frameworks */,
 				756FD4373073071200B6C0A9 /* Resources */,
+				756FD4703073071300B6C0A9 /* Stamp Build Number */,
 			);
 			buildRules = (
 			);
@@ -210,6 +211,23 @@
 			);
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		756FD4703073071300B6C0A9 /* Stamp Build Number */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			inputPaths = (
+				"$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)",
+			);
+			name = "Stamp Build Number";
+			shellPath = /bin/sh;
+			shellScript = (
+				"# CFBundleVersion is the build time (YYYYMMDD.HHMM), for Xcode and install_local.sh builds alike.",
+				"/usr/libexec/PlistBuddy -c \"Set :CFBundleVersion $(date +%Y%m%d.%H%M)\" \"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"",
+				"",
+			);
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		756FD4353073071200B6C0A9 /* Sources */ = {
@@ -371,6 +389,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -402,6 +421,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";

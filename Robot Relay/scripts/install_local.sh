@@ -8,11 +8,8 @@ DEST="/Applications/$APP_NAME.app"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/robot-relay-build.XXXXXX")"
 trap 'rm -rf "$BUILD_DIR"' EXIT
-# Major.minor is MARKETING_VERSION in the Xcode project (bumped by hand);
-# the build number is the local build time, shown in the sidebar footer.
-BUILD_NUMBER="$(date +%Y%m%d.%H%M)"
 
-echo "==> Building $APP_NAME (Release, build $BUILD_NUMBER)"
+echo "==> Building $APP_NAME (Release)"
 xcodebuild \
   -project "$ROOT/$APP_NAME.xcodeproj" \
   -scheme "$APP_NAME" \
@@ -20,11 +17,13 @@ xcodebuild \
   -destination 'generic/platform=macOS' \
   -derivedDataPath "$BUILD_DIR" \
   -quiet \
-  build \
-  CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
+  build
 
 BUILT="$BUILD_DIR/Build/Products/Release/$APP_NAME.app"
 [ -d "$BUILT" ] || { echo "error: build product not found at $BUILT" >&2; exit 1; }
+VERSION="$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$BUILT/Contents/Info.plist")"
+BUILD_NUMBER="$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$BUILT/Contents/Info.plist")"
+echo "==> Built v$VERSION build $BUILD_NUMBER"
 
 if pgrep -x "$APP_NAME" >/dev/null; then
   echo "==> Quitting running $APP_NAME"
