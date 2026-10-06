@@ -3,6 +3,8 @@ import SwiftUI
 /// The robot's links: phone app, Pico, controller.
 struct ConnectionPopover: View {
     @Environment(AppModel.self) private var app
+    @State private var isChoosingArm = false
+    @State private var isConfirmingDisarm = false
 
     var body: some View {
         @Bindable var connection = app.connection
@@ -108,11 +110,60 @@ struct ConnectionPopover: View {
                 }
             }
         } action: {
-            // Over USB, Disarm deletes bringup_mode.txt. No remote stop exists for the other routes.
-            Button(isUSB ? "Disarm" : "Release") { app.connection.releasePico() }
-                .buttonStyle(.nocturneGhost)
-                .disabled(!isUSB || pico.arm?.isArmed != true)
+            picoAction(pico)
         }
+    }
+
+    /// Over USB: Arm when idle, Disarm when armed, each confirmed first. Both only change
+    /// `bringup_mode.txt`, so they act on the next battery boot. No remote stop exists for
+    /// the other routes, so Release stays disabled there.
+    @ViewBuilder
+    private func picoAction(_ pico: PicoLink) -> some View {
+        if pico.route != .usb {
+            Button("Release") {}
+                .buttonStyle(.nocturneGhost)
+                .disabled(true)
+        } else if pico.arm?.isArmed == true {
+            Button("Disarm") { isConfirmingDisarm = true }
+                .buttonStyle(.nocturneGhost)
+                .confirmationDialog("Disarm the Pico?", isPresented: $isConfirmingDisarm) {
+                    Button("Disarm", role: .destructive) { app.connection.releasePico() }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text(Self.disarmMessage(pico.arm))
+                }
+        } else {
+            Button("Arm…") { isChoosingArm = true }
+                .buttonStyle(.nocturneSecondary)
+                .disabled(pico.arm != .idle)
+                .confirmationDialog("Arm the next battery boot?", isPresented: $isChoosingArm) {
+                    ForEach(Self.armChoices, id: \.label) { choice in
+                        Button(choice.label) {
+                            app.connection.armPico(mode: choice.mode, repeatEveryBoot: choice.repeats)
+                        }
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("""
+                    Writes bringup_mode.txt. Nothing moves now: the action runs after the countdown \
+                    the next time the carrier is switched on. A one-shot mode is used up by the next \
+                    power-on, including plugging USB back in. Repeat runs on every power-on until disarmed.
+                    """)
+                }
+        }
+    }
+
+    private static let armChoices: [(label: String, mode: ArmMode, repeats: Bool)] = [
+        ("test", .test, false),
+        ("center", .center, false),
+        ("repeat: test", .test, true),
+        ("repeat: center", .center, true),
+    ]
+
+    private static func disarmMessage(_ arm: PicoArm?) -> String {
+        let current = arm?.label ?? "armed"
+        return "Deletes bringup_mode.txt (now \(current)), so the next battery boot stays idle. "
+            + "It doesn't stop anything already moving; switch off power for that. You can arm again with Arm…"
     }
 
     private func controllerRow(_ controller: ControllerLink) -> some View {

@@ -1,10 +1,10 @@
 import Foundation
 
-/// The Pico 2 W over USB: found by `PicoUSBMonitor`, read and disarmed with `mpremote exec`,
+/// The Pico 2 W over USB: found by `PicoUSBMonitor`, read, armed and disarmed with `mpremote exec`,
 /// the same commands the firmware README uses. Never runs `mpremote reset`: with the carrier
 /// off, a reset would consume a one-shot test.
 ///
-/// The mode is read only on connect and after Disarm. There is no polling, because every
+/// The mode is read only on connect and after Arm or Disarm. There is no polling, because every
 /// mpremote call interrupts the board and takes the serial port.
 final class PicoUSBLink {
     var onChange: ((PicoLink) -> Void)?
@@ -30,6 +30,7 @@ final class PicoUSBLink {
 
     /// Deletes `bringup_mode.txt`, then reads the mode back so the row shows the board's state.
     func disarm() async {
+        await execThenRead(PicoMode.disarmScript)
     }
 
     /// Writes `value` (from `PicoMode.value`) to `bringup_mode.txt`, then reads the mode back.
@@ -96,6 +97,16 @@ nonisolated enum PicoMode {
 
     /// Deletes the file if it exists.
     static let disarmScript = "import os; '\(file)' in os.listdir() and os.remove('\(file)')"
+
+    /// The firmware README's arm command.
+    static func armScript(_ value: String) -> String {
+        "with open('\(file)', 'w') as f: f.write('\(value)')"
+    }
+
+    /// What `main.py` accepts: `test`, `center`, `repeat:test`, `repeat:center`.
+    static func value(mode: ArmMode, repeatEveryBoot: Bool) -> String {
+        (repeatEveryBoot ? "repeat:" : "") + mode.rawValue
+    }
 
     /// The `mode=` line of `readScript`'s output: empty is idle; nil when there is no such line.
     static func parse(_ output: String) -> PicoArm? {

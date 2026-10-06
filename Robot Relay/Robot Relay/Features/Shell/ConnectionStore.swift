@@ -80,6 +80,10 @@ final class ConnectionStore {
         Task { await service.releasePico() }
     }
 
+    func armPico(mode: ArmMode, repeatEveryBoot: Bool) {
+        Task { await service.armPico(mode: mode, repeatEveryBoot: repeatEveryBoot) }
+    }
+
     func pairController() {
         Task { await service.pairController() }
     }

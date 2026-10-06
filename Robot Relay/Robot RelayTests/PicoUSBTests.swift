@@ -16,6 +16,13 @@ struct PicoModeTests {
         #expect(PicoMode.parse("") == nil)
         #expect(PicoMode.parse("Traceback (most recent call last):\nOSError: 2\n") == nil)
     }
+
+    @Test func armWritesWhatMainPyAccepts() {
+        #expect(PicoMode.value(mode: .test, repeatEveryBoot: false) == "test")
+        #expect(PicoMode.value(mode: .center, repeatEveryBoot: true) == "repeat:center")
+        #expect(PicoMode.armScript("repeat:test")
+            == "with open('bringup_mode.txt', 'w') as f: f.write('repeat:test')")
+    }
 }
 
 struct PicoUSBTests {

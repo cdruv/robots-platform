@@ -34,6 +34,11 @@ final class PlaceholderRobotLinkService: RobotLinkService {
         publish()
     }
 
+    func armPico(mode: ArmMode, repeatEveryBoot: Bool) async {
+        current.pico.arm = .armed(PicoMode.value(mode: mode, repeatEveryBoot: repeatEveryBoot))
+        publish()
+    }
+
     func pairController() async {
         current.controller.isPaired = !(current.controller.isPaired ?? false)
         publish()

@@ -44,6 +44,9 @@ protocol RobotLinkService: AnyObject {
     /// Over USB this disarms: deletes `bringup_mode.txt` so the next battery boot does nothing.
     /// No remote stop exists; removing power is the immediate stop.
     func releasePico() async
+    /// Over USB, writes `bringup_mode.txt` so the next battery boot runs `mode`, the same
+    /// command as the firmware README. Nothing moves until that boot.
+    func armPico(mode: ArmMode, repeatEveryBoot: Bool) async
     func pairController() async
     /// Runs `adb forward` so the phone's telemetry port is reachable on localhost.
     func adbForward(address: String) async

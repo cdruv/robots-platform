@@ -43,6 +43,10 @@ final class PhoneLinkService: RobotLinkService {
         await pico.disarm()
     }
 
+    func armPico(mode: ArmMode, repeatEveryBoot: Bool) async {
+        await pico.arm(PicoMode.value(mode: mode, repeatEveryBoot: repeatEveryBoot))
+    }
+
     func pairController() async {}
 
     /// Runs `adb devices`, picks the one online phone, forwards its port to
