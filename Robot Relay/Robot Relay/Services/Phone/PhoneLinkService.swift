@@ -66,6 +66,11 @@ final class PhoneLinkService: RobotLinkService {
         connection.connect(to: PhoneAddress(host: "127.0.0.1", port: port))
     }
 
+    func clearActivity() async {
+        current.activity.removeAll()
+        continuation.yield(current)
+    }
+
     private func apply(_ status: PhoneConnection.Status) {
         var phone = current.phone
         phone.state = status.state
@@ -86,7 +91,7 @@ final class PhoneLinkService: RobotLinkService {
     }
 
     private func record(_ entry: LinkActivity) {
-        LinkActivity.upsert(entry, into: &current.activity)
+        LinkActivity.append(entry, to: &current.activity)
         continuation.yield(current)
     }
 }

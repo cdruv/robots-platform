@@ -49,6 +49,11 @@ final class PlaceholderRobotLinkService: RobotLinkService {
         publish()
     }
 
+    func clearActivity() async {
+        current.activity.removeAll()
+        publish()
+    }
+
     private func publish() {
         continuation.yield(current)
     }

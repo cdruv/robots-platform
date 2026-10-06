@@ -21,7 +21,7 @@ nonisolated struct CommandResult: Sendable {
 /// Runs command-line tools (`adb`, `mpremote`) the way a terminal would, and reports
 /// each run to the activity footer as the command a person would type.
 final class CommandRunner {
-    /// Receives a `.running` entry when a command starts and the same entry, finished, when it ends.
+    /// Receives a `.running` entry when a command starts and a second entry with the result when it ends.
     var report: ((LinkActivity) -> Void)?
 
     private let environment: [String: String]
@@ -39,17 +39,15 @@ final class CommandRunner {
         timeout: Duration = .seconds(15),
         judge: (CommandResult) -> LinkActivity.State = { $0.succeeded ? .ok(nil) : .failed($0.failureReason) }
     ) async -> CommandResult {
-        var entry = LinkActivity(text: "$ " + Self.displayCommand(tool, arguments), state: .running)
-        report?(entry)
+        let text = "$ " + Self.displayCommand(tool, arguments)
+        report?(LinkActivity(text: text, state: .running))
         let result: CommandResult
         if let url = Self.resolve(tool, environment: environment) {
             result = await Self.execute(url, arguments, timeout: timeout)
         } else {
             result = CommandResult(status: 127, stdout: "", stderr: "\(tool) not found (looked in \(Self.searchDirectories(environment: environment).joined(separator: ", ")))")
         }
-        entry.state = judge(result)
-        entry.date = .now
-        report?(entry)
+        report?(LinkActivity(text: text, state: judge(result)))
         return result
     }
 

@@ -91,4 +91,8 @@ final class ConnectionStore {
     func adbForward() {
         Task { await service.adbForward(address: addressDraft) }
     }
+
+    func clearActivity() {
+        Task { await service.clearActivity() }
+    }
 }

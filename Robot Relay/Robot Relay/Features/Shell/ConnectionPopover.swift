@@ -43,7 +43,7 @@ struct ConnectionPopover: View {
             }
 
             if !links.activity.isEmpty {
-                ActivityFooter(entries: links.activity)
+                ActivityFooter(entries: links.activity) { connection.clearActivity() }
             }
         }
         .padding(16)
@@ -186,23 +186,32 @@ struct ConnectionPopover: View {
 /// type to do it yourself. Scrolls, stays pinned to the newest line, selectable for copying.
 private struct ActivityFooter: View {
     let entries: [LinkActivity]
+    let clear: () -> Void
 
     var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 3) {
-                ForEach(entries) { entry in
-                    line(entry)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        HStack(alignment: .bottom, spacing: 8) {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 3) {
+                    ForEach(entries) { entry in
+                        line(entry)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
+                .textSelection(.enabled)
             }
-            .textSelection(.enabled)
+            .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.bottom, for: .sizeChanges)
+            .scrollBounceBehavior(.basedOnSize)
+            .frame(height: 104)
+
+            Button(action: clear) {
+                Image(systemName: "trash")
+            }
+            .buttonStyle(NocturneButtonStyle(kind: .secondary, fontSize: 10, foreground: Nocturne.neutral400))
+            .help("Clear activity")
         }
-        .defaultScrollAnchor(.bottom)
-        .defaultScrollAnchor(.bottom, for: .sizeChanges)
-        .scrollBounceBehavior(.basedOnSize)
-        .frame(height: 104)
         .font(.nocturneMono(10.5))
         .foregroundStyle(Nocturne.neutral600)
     }

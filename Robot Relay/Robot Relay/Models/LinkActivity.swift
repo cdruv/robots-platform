@@ -1,7 +1,7 @@
 import Foundation
 
 /// One line of the popover's activity log: a command the app ran, or the terminal
-/// equivalent of what it did. Re-sending an entry with the same `id` updates it in place.
+/// equivalent of what it did. Lines are only appended, so the log stays in time order.
 nonisolated struct LinkActivity: Identifiable, Equatable, Sendable {
     enum State: Equatable, Sendable {
         case running
@@ -14,13 +14,9 @@ nonisolated struct LinkActivity: Identifiable, Equatable, Sendable {
     var text: String
     var state: State
 
-    /// Keeps the newest `limit` entries, replacing any entry that shares `id`.
-    static func upsert(_ entry: LinkActivity, into entries: inout [LinkActivity], limit: Int = 500) {
-        if let index = entries.firstIndex(where: { $0.id == entry.id }) {
-            entries[index] = entry
-        } else {
-            entries.append(entry)
-        }
+    /// Appends `entry`, keeping the newest `limit` entries.
+    static func append(_ entry: LinkActivity, to entries: inout [LinkActivity], limit: Int = 500) {
+        entries.append(entry)
         if entries.count > limit { entries.removeFirst(entries.count - limit) }
     }
 }

@@ -3,7 +3,8 @@ import Network
 
 /// The TCP link to onboard-android's telemetry server (`TcpServerSink`, NDJSON on :7777).
 ///
-/// Reconnects with a 1, 2, 4, then 5 s backoff while the user wants to be connected. Each
+/// Reconnects with a 1, 2, 4, then 5 s backoff while the user wants to be connected, and gives
+/// up after `maxAttempts` attempts in a row end without a hello. Each
 /// connection starts with a hello line and a replay of recent events; replayed events already
 /// seen in the same session are skipped, so the event stream has no duplicates.
 final class PhoneConnection {
@@ -19,6 +20,7 @@ final class PhoneConnection {
 
     static let pingInterval: Duration = .seconds(2)
     static let backoff: [Duration] = [.seconds(1), .seconds(2), .seconds(4), .seconds(5)]
+    static let maxAttempts = 5
 
     var onStatus: ((Status) -> Void)?
     var onActivity: ((LinkActivity) -> Void)?
@@ -46,9 +48,8 @@ final class PhoneConnection {
     private var pingsInFlight: [Int64: ContinuousClock.Instant] = [:]
     private var eventsThisSecond = 0
 
-    /// Footer entries, updated in place across retries.
-    private var connectEntry = LinkActivity(text: "", state: .running)
-    private var helloEntry = LinkActivity(text: "", state: .running)
+    /// The footer's text for the current connection, as `nc` would be typed.
+    private var connectText = ""
 
     init() {
         (events, eventSink) = AsyncStream.makeStream(of: TelemetryEvent.self, bufferingPolicy: .bufferingNewest(5000))
@@ -62,8 +63,7 @@ final class PhoneConnection {
         wantsConnection = true
         failures = 0
         status.address = address
-        connectEntry = LinkActivity(text: "nc \(address.host) \(address.port)", state: .running)
-        helloEntry = LinkActivity(text: "", state: .running)
+        connectText = "nc \(address.host) \(address.port)"
         open()
     }
 
@@ -84,7 +84,7 @@ final class PhoneConnection {
         status.state = .disconnected
         status.rttMs = nil
         status.eventsPerSecond = 0
-        if reporting && wasActive { report(&connectEntry, .ok("closed")) }
+        if reporting && wasActive { report(connectText, .ok("closed")) }
     }
 
     private func open() {
@@ -98,7 +98,7 @@ final class PhoneConnection {
         sawEvent = false
         pingsInFlight = [:]
         status.state = .connecting
-        report(&connectEntry, .running)
+        report(connectText, .running)
 
         connection.stateUpdateHandler = { [weak self] state in
             MainActor.assumeIsolated {
@@ -113,7 +113,7 @@ final class PhoneConnection {
         switch state {
         case .ready:
             status.state = .connected
-            report(&connectEntry, .ok("connected"))
+            report(connectText, .ok("connected"))
             receive()
             startTicking()
         case .waiting(let error), .failed(let error):
@@ -143,7 +143,7 @@ final class PhoneConnection {
         }
     }
 
-    /// The connection ended without the user asking: schedule a reconnect.
+    /// The connection ended without the user asking: schedule a reconnect, or give up.
     private func lost(_ reason: String) {
         closeConnection()
         tickTask?.cancel()
@@ -151,10 +151,16 @@ final class PhoneConnection {
         status.rttMs = nil
         status.eventsPerSecond = 0
         guard wantsConnection else { return }
-        let delay = Self.backoff[min(failures, Self.backoff.count - 1)]
         failures += 1
+        guard failures < Self.maxAttempts else {
+            wantsConnection = false
+            status.state = .disconnected
+            report(connectText, .failed("\(reason) · gave up after \(Self.maxAttempts) attempts"))
+            return
+        }
+        let delay = Self.backoff[min(failures - 1, Self.backoff.count - 1)]
         status.state = .retrying(Date.now.addingTimeInterval(Double(delay.components.seconds)))
-        report(&connectEntry, .failed("\(reason) · retry in \(delay.components.seconds) s"))
+        report(connectText, .failed("\(reason) · retry in \(delay.components.seconds) s"))
         retryTask?.cancel()
         retryTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
@@ -179,8 +185,7 @@ final class PhoneConnection {
             failures = 0
             if dedupe.begin(session: hello.session) { status.dropped = 0 }
             status.hello = hello
-            helloEntry.text = "← hello \(hello.summary)"
-            report(&helloEntry, .ok(nil))
+            report("← hello \(hello.summary)", .ok(nil))
         case .pong(let ping):
             guard let sent = pingsInFlight.removeValue(forKey: ping) else { return }
             let elapsed = ContinuousClock.now - sent
@@ -227,10 +232,8 @@ final class PhoneConnection {
         connection.send(content: Data("{\"ping\":\(ping)}\n".utf8), completion: .contentProcessed { _ in })
     }
 
-    private func report(_ entry: inout LinkActivity, _ state: LinkActivity.State) {
-        entry.state = state
-        entry.date = .now
-        onActivity?(entry)
+    private func report(_ text: String, _ state: LinkActivity.State) {
+        onActivity?(LinkActivity(text: text, state: state))
     }
 
     private static func describe(_ error: NWError) -> String {
