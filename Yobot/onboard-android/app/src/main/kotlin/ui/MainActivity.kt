@@ -45,7 +45,7 @@ private val OverlayFade = tween<Float>(240)
  * only while resumed, focused, unlocked, and on an active display.
  */
 class MainActivity : ComponentActivity() {
-    private val brain get() = (application as YobotApplication).brain
+    private val runtime get() = (application as YobotApplication).runtime
 
     private var resumed = false
     private var focused = false
@@ -68,7 +68,7 @@ class MainActivity : ComponentActivity() {
         if (granted) {
             setRobotActive(false)
             updateForeground()
-        } else brain.telemetry.logger("activity").warn("RECORD_AUDIO denied; hearing stays off")
+        } else runtime.telemetry.logger("activity").warn("RECORD_AUDIO denied; hearing stays off")
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,14 +90,14 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun showFace() {
-        val brain = brain
+        val runtime = runtime
         faceView.setContent {
             var showDebug by rememberSaveable { mutableStateOf(false) }
             Box(Modifier.fillMaxSize().background(FaceBackground)) {
-                val target by brain.face.state.collectAsStateWithLifecycle()
-                FaceRenderer(target, motionReflex = brain.faceMotionReflex, overlayVisible = showDebug)
+                val target by runtime.face.state.collectAsStateWithLifecycle()
+                FaceRenderer(target, motionReflex = runtime.faceMotionReflex, overlayVisible = showDebug)
                 AnimatedVisibility(showDebug, enter = fadeIn(OverlayFade), exit = fadeOut(OverlayFade)) {
-                    DebugOverlay(brain, window, Modifier.fillMaxSize())
+                    DebugOverlay(runtime, window, Modifier.fillMaxSize())
                 }
                 DebugToggle(
                     active = showDebug,
@@ -157,14 +157,14 @@ class MainActivity : ComponentActivity() {
         if (active == robotActive) return
         robotActive = active
         if (active) {
-            brain.resume()
+            runtime.resume()
             showFace()
         } else {
             // Dispose immediately: a state change alone may wait for a frame that never
             // arrives with the screen off, leaving LaunchedEffect timers running.
             faceView.setContent {}
             faceView.disposeComposition()
-            brain.pause()
+            runtime.pause()
         }
     }
 }

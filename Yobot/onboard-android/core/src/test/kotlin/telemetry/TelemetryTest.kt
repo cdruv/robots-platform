@@ -106,11 +106,11 @@ class TelemetryTest {
     fun loggerEmitsLevelledEventsAsJsonLines() = runTest {
         val sink = FakeSink("a")
         val telemetry = telemetry(sink)
-        telemetry.logger("brain").warn("careful", IllegalStateException("x"))
+        telemetry.logger("runtime").warn("careful", IllegalStateException("x"))
         advanceTimeBy(300)
         runCurrent()
         val event = sink.events.single()
-        assertEquals("brain" to "log.warn", event.source to event.kind)
+        assertEquals("runtime" to "log.warn", event.source to event.kind)
         val line = event.toJsonLine()
         assertTrue(line, line.startsWith("{\"seq\":1,\"tsWallMs\":1000000,\"tsMonoNs\":"))
         assertTrue(line, line.contains("\"msg\":\"careful\""))

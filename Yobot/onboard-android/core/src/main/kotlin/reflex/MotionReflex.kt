@@ -16,8 +16,8 @@ import kotlinx.coroutines.flow.StateFlow
  *   triggers thinking or drives actuators; anything the robot should decide on is also
  *   posted as a coarse Percept through the normal path.
  * - Every reflex is an interface in this package named `*Reflex`, and is connected in one
- *   place: the "Reflexes" block of the composition root (`Brain`), which also announces it
- *   in the boot telemetry event.
+ *   place: the composition root (`Runtime`), which also announces it
+ *   in the session resume telemetry event.
  */
 
 /** Reflex: live body motion for outputs that animate with it. Bypasses the Executive; see the file header. */

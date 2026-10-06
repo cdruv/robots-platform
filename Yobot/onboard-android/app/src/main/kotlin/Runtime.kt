@@ -21,7 +21,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /** Owns a foreground session. Construction alone starts no work. */
-class Brain(context: Context) {
+class Runtime(context: Context) {
     private val app = context.applicationContext
     val recentEvents = RecentEventsSink()
     val face = ComposeFace()
@@ -50,14 +50,14 @@ class Brain(context: Context) {
         running = true
         telemetryServer.start()
         telemetry.start()
-        telemetry.emit("brain", "resume", buildJsonObject {
+        telemetry.emit("runtime", "resume", buildJsonObject {
             put("inference", inference.backendName)
             put("reflexes", "imu->face")
             put("telemetryPort", telemetryServer.status.value.port)
         })
         session.senses.forEach { sense ->
             runCatching { sense.start(session::onPercept) }
-                .onFailure { telemetry.logger("brain").error("${sense.name} failed to start", it) }
+                .onFailure { telemetry.logger("runtime").error("${sense.name} failed to start", it) }
         }
     }
 
@@ -66,7 +66,7 @@ class Brain(context: Context) {
         running = false
         session.senses.forEach { sense ->
             runCatching { sense.stop() }
-                .onFailure { telemetry.logger("brain").error("${sense.name} failed to stop", it) }
+                .onFailure { telemetry.logger("runtime").error("${sense.name} failed to stop", it) }
         }
         // Close sockets immediately and cancel all workers/timers, without draining old work.
         telemetryServer.close()

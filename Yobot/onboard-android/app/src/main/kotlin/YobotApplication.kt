@@ -3,11 +3,11 @@ package com.vadymsidorov.yobot
 import android.app.Application
 
 class YobotApplication : Application() {
-    lateinit var brain: Brain
+    lateinit var runtime: Runtime
         private set
 
     override fun onCreate() {
         super.onCreate()
-        brain = Brain(this)
+        runtime = Runtime(this)
     }
 }

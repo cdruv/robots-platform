@@ -60,7 +60,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.vadymsidorov.yobot.Brain
+import com.vadymsidorov.yobot.Runtime
 import com.vadymsidorov.yobot.core.telemetry.TelemetryEvent
 import com.vadymsidorov.yobot.core.telemetry.presentation
 import com.vadymsidorov.yobot.core.telemetry.toJsonLine
@@ -108,11 +108,11 @@ fun DebugToggle(active: Boolean, onClick: () -> Unit, modifier: Modifier = Modif
 
 /** Hearing status, the IMU reflex feed, telemetry stream status, and the most recent telemetry events. */
 @Composable
-fun DebugOverlay(brain: Brain, window: Window, modifier: Modifier = Modifier) {
-    val hearing by brain.hearing.status.collectAsStateWithLifecycle()
-    val body by brain.faceMotionReflex.bodyMotion.collectAsStateWithLifecycle()
-    val server by brain.telemetryServer.status.collectAsStateWithLifecycle()
-    val events by brain.recentEvents.events.collectAsStateWithLifecycle()
+fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier) {
+    val hearing by runtime.hearing.status.collectAsStateWithLifecycle()
+    val body by runtime.faceMotionReflex.bodyMotion.collectAsStateWithLifecycle()
+    val server by runtime.telemetryServer.status.collectAsStateWithLifecycle()
+    val events by runtime.recentEvents.events.collectAsStateWithLifecycle()
     var showPartial by rememberSaveable { mutableStateOf(false) }
     var showMotion by rememberSaveable { mutableStateOf(true) }
     var showSpeech by rememberSaveable { mutableStateOf(true) }
@@ -178,7 +178,7 @@ fun DebugOverlay(brain: Brain, window: Window, modifier: Modifier = Modifier) {
                     if (muted) "[unmute]" else "[mute]",
                     style = Mono.copy(color = Amber),
                     modifier = Modifier.clickable(interactionSource = null, indication = null) {
-                        brain.hearing.setEnabled(muted)
+                        runtime.hearing.setEnabled(muted)
                     },
                 )
             }
@@ -205,7 +205,7 @@ fun DebugOverlay(brain: Brain, window: Window, modifier: Modifier = Modifier) {
                             if (server.addresses.isNotEmpty()) append("  ${server.addresses.joinToString(" ")}")
                         }
                     }
-                    val dropped = brain.telemetry.droppedTotal
+                    val dropped = runtime.telemetry.droppedTotal
                     if (dropped > 0) append("  dropped $dropped")
                 },
                 style = Mono.copy(color = if (server.error != null) Red else Dim),
@@ -250,7 +250,7 @@ fun DebugOverlay(brain: Brain, window: Window, modifier: Modifier = Modifier) {
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
             FooterButton("Clear logs", FooterIcon.Clear) {
-                brain.recentEvents.clear()
+                runtime.recentEvents.clear()
                 following = true
             }
             FooterButton(
