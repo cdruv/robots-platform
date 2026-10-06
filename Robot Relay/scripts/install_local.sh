@@ -8,8 +8,11 @@ DEST="/Applications/$APP_NAME.app"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUILD_DIR="$(mktemp -d "${TMPDIR:-/tmp}/robot-relay-build.XXXXXX")"
 trap 'rm -rf "$BUILD_DIR"' EXIT
+# Major.minor is MARKETING_VERSION in the Xcode project (bumped by hand);
+# the build number is the local build time, shown in the sidebar footer.
+BUILD_NUMBER="$(date +%Y%m%d.%H%M)"
 
-echo "==> Building $APP_NAME (Release)"
+echo "==> Building $APP_NAME (Release, build $BUILD_NUMBER)"
 xcodebuild \
   -project "$ROOT/$APP_NAME.xcodeproj" \
   -scheme "$APP_NAME" \
@@ -17,7 +20,8 @@ xcodebuild \
   -destination 'generic/platform=macOS' \
   -derivedDataPath "$BUILD_DIR" \
   -quiet \
-  build
+  build \
+  CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
 BUILT="$BUILD_DIR/Build/Products/Release/$APP_NAME.app"
 [ -d "$BUILT" ] || { echo "error: build product not found at $BUILT" >&2; exit 1; }

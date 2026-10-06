@@ -15,6 +15,7 @@ struct SidebarView: View {
             }
             Spacer(minLength: 0)
             stats
+            version
         }
         .padding(.horizontal, 14)
         // Extra top inset keeps the brand row clear of the window's traffic lights.
@@ -33,6 +34,13 @@ struct SidebarView: View {
                     .foregroundStyle(Nocturne.neutral600)
             }
         }
+    }
+
+    private var version: some View {
+        Text(AppVersion.display)
+            .font(.nocturneMono(10))
+            .foregroundStyle(Nocturne.neutral600)
+            .textSelection(.enabled)
     }
 
     private var stats: some View {
