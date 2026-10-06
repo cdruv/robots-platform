@@ -165,14 +165,14 @@ struct LinkActivityTests {
     @Test func updatesInPlaceAndKeepsTheNewestFour() {
         var entries: [LinkActivity] = []
         var retrying = LinkActivity(text: "nc 10.0.0.42 7777", state: .running)
-        LinkActivity.upsert(retrying, into: &entries)
+        LinkActivity.upsert(retrying, into: &entries, limit: 4)
         retrying.state = .failed("refused · retry in 1 s")
-        LinkActivity.upsert(retrying, into: &entries)
+        LinkActivity.upsert(retrying, into: &entries, limit: 4)
         #expect(entries.count == 1)
         #expect(entries[0].state == .failed("refused · retry in 1 s"))
 
         for index in 0..<4 {
-            LinkActivity.upsert(LinkActivity(text: "\(index)", state: .ok(nil)), into: &entries)
+            LinkActivity.upsert(LinkActivity(text: "\(index)", state: .ok(nil)), into: &entries, limit: 4)
         }
         #expect(entries.map(\.text) == ["0", "1", "2", "3"])
     }

@@ -1,6 +1,6 @@
 import Foundation
 
-/// One line of the popover's activity footer: a command the app ran, or the terminal
+/// One line of the popover's activity log: a command the app ran, or the terminal
 /// equivalent of what it did. Re-sending an entry with the same `id` updates it in place.
 nonisolated struct LinkActivity: Identifiable, Equatable, Sendable {
     enum State: Equatable, Sendable {
@@ -15,7 +15,7 @@ nonisolated struct LinkActivity: Identifiable, Equatable, Sendable {
     var state: State
 
     /// Keeps the newest `limit` entries, replacing any entry that shares `id`.
-    static func upsert(_ entry: LinkActivity, into entries: inout [LinkActivity], limit: Int = 4) {
+    static func upsert(_ entry: LinkActivity, into entries: inout [LinkActivity], limit: Int = 500) {
         if let index = entries.firstIndex(where: { $0.id == entry.id }) {
             entries[index] = entry
         } else {

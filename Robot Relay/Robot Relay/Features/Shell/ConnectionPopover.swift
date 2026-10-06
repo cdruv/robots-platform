@@ -182,26 +182,36 @@ struct ConnectionPopover: View {
     }
 }
 
-/// What the app just did, as the commands you would type to do it yourself
-/// (`scripts/relay-phone.sh` and `scripts/relay-pico.sh` run the same ones). Selectable for copying.
+/// Everything the app did this session (newest 500, oldest first), as the commands you would
+/// type to do it yourself. Scrolls, stays pinned to the newest line, selectable for copying.
 private struct ActivityFooter: View {
     let entries: [LinkActivity]
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            ForEach(entries) { entry in
-                line(entry)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 3) {
+                ForEach(entries) { entry in
+                    line(entry)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
+            .textSelection(.enabled)
         }
+        .defaultScrollAnchor(.bottom)
+        .defaultScrollAnchor(.bottom, for: .sizeChanges)
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: 104)
         .font(.nocturneMono(10.5))
         .foregroundStyle(Nocturne.neutral600)
-        .textSelection(.enabled)
     }
 
     private func line(_ entry: LinkActivity) -> Text {
+        Text("\(Text(entry.date, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute().second()).foregroundStyle(Nocturne.neutral700))  \(command(entry))")
+    }
+
+    private func command(_ entry: LinkActivity) -> Text {
         switch entry.state {
         case .running:
             Text("\(entry.text)…").foregroundStyle(Nocturne.neutral500)
