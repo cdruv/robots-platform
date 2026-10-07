@@ -42,6 +42,8 @@ protocol RobotLinkService: AnyObject {
     func links() -> AsyncStream<RobotLinks>
     func connectPhone(address: String) async
     func disconnectPhone() async
+    /// Reads the Pico over USB again, retrying like it does on plug-in.
+    func refreshPico() async
     func pairController() async
     /// Runs `adb forward` so the phone's telemetry port is reachable on localhost.
     func adbForward(address: String) async

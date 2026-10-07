@@ -29,6 +29,8 @@ final class PlaceholderRobotLinkService: RobotLinkService {
         publish()
     }
 
+    func refreshPico() async {}
+
     func pairController() async {
         current.controller.isPaired = !(current.controller.isPaired ?? false)
         publish()

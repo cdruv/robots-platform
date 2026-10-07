@@ -25,12 +25,16 @@ final class ConnectionStore {
         addressDraft = defaults.string(forKey: Self.addressKey) ?? PhoneAddress.defaultForward.description
     }
 
+    /// Follows the links and connects to the remembered phone address.
     func start() {
         guard task == nil else { return }
         task = Task { [weak self, service] in
             for await links in service.links() {
                 self?.links = links
             }
+        }
+        if let address = PhoneAddress(addressDraft) {
+            Task { await service.connectPhone(address: address.description) }
         }
     }
 
@@ -74,6 +78,10 @@ final class ConnectionStore {
             return
         }
         Task { await service.connectPhone(address: address.description) }
+    }
+
+    func refreshPico() {
+        Task { await service.refreshPico() }
     }
 
     func pairController() {

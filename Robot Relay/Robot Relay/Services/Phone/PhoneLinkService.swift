@@ -39,6 +39,10 @@ final class PhoneLinkService: RobotLinkService {
         connection.disconnect()
     }
 
+    func refreshPico() async {
+        pico.refresh()
+    }
+
     func pairController() async {}
 
     /// Runs `adb devices`, picks the one online phone, forwards its port to

@@ -81,7 +81,7 @@ struct ConnectionPopover: View {
         text.isEmpty ? "—" : text
     }
 
-    /// Status only: the USB port, MicroPython release and power-on mode, as read on connect.
+    /// Status only: the USB port, MicroPython release and power-on mode, as read on connect or Refresh.
     /// Uploads and the power-on mode are changed in the Firmware tab.
     private func picoRow(_ pico: PicoLink) -> some View {
         let rail = pico.railVolts.map { String(format: "servo rail %.1f V", $0) } ?? "rail not measured"
@@ -116,6 +116,14 @@ struct ConnectionPopover: View {
                 }
             }
         } action: {
+            Button {
+                app.connection.refreshPico()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.nocturneGhost)
+            .disabled(!isUSB)
+            .help("Read the board again")
             Button("Firmware") {
                 app.selection = .firmware
                 app.isConnectionPopoverPresented = false

@@ -5,8 +5,8 @@ import Foundation
 /// reset would consume a once: request.
 ///
 /// Plug and unplug come from IOKit as they happen, so nothing polls. The board itself is read
-/// only on connect and after a firmware change, because every mpremote call interrupts it
-/// and takes the serial port. A failed connect read (port busy) is retried a few times.
+/// on connect, on Refresh and after a firmware change, because every mpremote call interrupts
+/// it and takes the serial port. A failed read (port busy) is retried 3 times, 3 s apart.
 /// All mpremote calls, including the Firmware tab's, go through one queue so they never
 /// fight over the port.
 final class PicoUSBLink {
@@ -22,8 +22,8 @@ final class PicoUSBLink {
     private var generation = 0
     /// mpremote calls run one at a time; two would fight over the port.
     private var tail: Task<Void, Never>?
-    /// Waits before re-reading after a failed connect read, then gives up until the next plug.
-    private static let retryDelays: [Duration] = [.seconds(2), .seconds(5), .seconds(15)]
+    /// Waits before re-reading after a failed read, then gives up until the next plug or Refresh.
+    private static let retryDelays: [Duration] = [.seconds(3), .seconds(3), .seconds(3)]
 
     init(runner: CommandRunner, monitor: PicoUSBMonitor = PicoUSBMonitor()) {
         self.runner = runner
@@ -40,6 +40,13 @@ final class PicoUSBLink {
         monitor.onChange = { [weak self] port in self?.portChanged(port) }
         monitor.start()
         if monitor.port == nil { portChanged(nil) }
+    }
+
+    /// Reads the board again, with the same retries as on connect. Does nothing without a Pico on USB.
+    func refresh() {
+        guard current.port != nil else { return }
+        generation += 1  // Drops retries still pending from an earlier read.
+        readOnConnect(attempt: 0)
     }
 
     /// Runs `work` with the port once no other mpremote call is running, then reads the board

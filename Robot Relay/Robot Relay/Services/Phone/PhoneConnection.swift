@@ -3,8 +3,8 @@ import Network
 
 /// The TCP link to onboard-android's telemetry server (`TcpServerSink`, NDJSON on :7777).
 ///
-/// Reconnects with a 1, 2, 4, then 5 s backoff while the user wants to be connected, and gives
-/// up after `maxAttempts` attempts in a row end without a hello. Each
+/// Reconnects every 3 s while the user wants to be connected, and gives up after
+/// `maxAttempts` attempts in a row (the first plus 3 retries) end without a hello. Each
 /// connection starts with a hello line and a replay of recent events; replayed events already
 /// seen in the same session are skipped, so the event stream has no duplicates.
 final class PhoneConnection {
@@ -19,8 +19,8 @@ final class PhoneConnection {
     }
 
     static let pingInterval: Duration = .seconds(2)
-    static let backoff: [Duration] = [.seconds(1), .seconds(2), .seconds(4), .seconds(5)]
-    static let maxAttempts = 5
+    static let backoff: [Duration] = [.seconds(3)]
+    static let maxAttempts = 4
 
     var onStatus: ((Status) -> Void)?
     var onActivity: ((LinkActivity) -> Void)?
