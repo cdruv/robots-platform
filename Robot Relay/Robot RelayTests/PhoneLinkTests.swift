@@ -92,24 +92,16 @@ struct SeqDedupeTests {
         #expect(live)
     }
 
-    @Test func newSessionStartsOver() {
+    /// A new session, or an unknown one, restarts seq.
+    @Test(arguments: [("a", "b"), (nil, nil)] as [(String?, String?)])
+    func anotherSessionStartsOver(first: String?, next: String?) {
         var dedupe = SeqDedupe()
-        _ = dedupe.begin(session: "a")
+        _ = dedupe.begin(session: first)
         _ = dedupe.admit(500)
-        let restarted = dedupe.begin(session: "b")
-        let first = dedupe.admit(1)
+        let restarted = dedupe.begin(session: next)
+        let admitted = dedupe.admit(1)
         #expect(restarted)
-        #expect(first)
-    }
-
-    @Test func unknownSessionAlwaysStartsOver() {
-        var dedupe = SeqDedupe()
-        _ = dedupe.begin(session: nil)
-        _ = dedupe.admit(500)
-        let restarted = dedupe.begin(session: nil)
-        let first = dedupe.admit(1)
-        #expect(restarted)
-        #expect(first)
+        #expect(admitted)
     }
 }
 
@@ -172,5 +164,12 @@ struct LinkActivityTests {
             LinkActivity.append(LinkActivity(text: "\(index)", state: .ok(nil)), to: &entries, limit: 4)
         }
         #expect(entries.map(\.text) == ["0", "1", "2", "3"])
+    }
+}
+
+struct TestHostTests {
+    /// The host app picks placeholder services from this; if Xcode stops setting it, live ones start.
+    @Test func runsInsideTheTestHost() {
+        #expect(RobotServices.isTestHost)
     }
 }

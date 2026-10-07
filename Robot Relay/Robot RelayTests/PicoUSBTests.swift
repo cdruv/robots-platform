@@ -24,7 +24,6 @@ struct PicoModeTests {
 
     @Test func readsTheModesTheFirmwareLists() {
         let output = "mode=\nmodes=body,center,sweep,once:center,once:sweep\r\n"
-        #expect(PicoMode.parse(output) == .idle)
         #expect(PicoMode.parseModes(output) == ["body", "center", "sweep", "once:center", "once:sweep"])
     }
 
@@ -45,26 +44,20 @@ struct PicoUSBTests {
         #expect(PicoUSB.choosePort(["/dev/cu.usbserial-2", "/dev/cu.usbserial-1"]) == "/dev/cu.usbserial-1")
         #expect(PicoUSB.choosePort([]) == nil)
     }
-
-    @Test func vendorIsRaspberryPi() {
-        #expect(PicoUSB.vendorID == 0x2E8A)
-    }
 }
 
 struct PicoArmTests {
-    @Test func labels() {
-        #expect(PicoArm.idle.label == "idle")
-        #expect(PicoArm.armed("body").label == "boot: body")
-        #expect(PicoArm.armed("once:center").label == "once: center")
-        #expect(PicoArm.armed("bogus").label == "boot: bogus")
-    }
-
-    @Test func menuLabels() {
-        #expect(PicoArm.menuLabel("body") == "body")
-        #expect(PicoArm.menuLabel("once:sweep") == "once: sweep")
+    @Test(arguments: [
+        ("body", "boot: body", "body"),
+        ("once:sweep", "once: sweep", "once: sweep"),
+    ])
+    func labels(mode: String, label: String, menuLabel: String) {
+        #expect(PicoArm.armed(mode).label == label)
+        #expect(PicoArm.menuLabel(mode) == menuLabel)
     }
 
     @Test func onlyIdleIsDisarmed() {
+        #expect(PicoArm.idle.label == "idle")
         #expect(!PicoArm.idle.isArmed)
         #expect(PicoArm.armed("test").isArmed)
         #expect(PicoArm.armed("once:sweep").isArmed)

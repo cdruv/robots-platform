@@ -88,6 +88,7 @@ final class PhoneConnection {
     }
 
     private func open() {
+        precondition(!RobotServices.isTestHost, "unit tests must not open a phone connection")
         guard let address = status.address, let port = NWEndpoint.Port(rawValue: address.port) else { return }
         generation += 1
         let current = generation
@@ -152,13 +153,12 @@ final class PhoneConnection {
         status.eventsPerSecond = 0
         guard wantsConnection else { return }
         failures += 1
-        guard failures < Self.maxAttempts else {
+        guard let delay = Self.retryDelay(afterFailures: failures) else {
             wantsConnection = false
             status.state = .disconnected
             report(connectText, .failed("\(reason) · gave up after \(Self.maxAttempts) attempts"))
             return
         }
-        let delay = Self.backoff[min(failures - 1, Self.backoff.count - 1)]
         status.state = .retrying(Date.now.addingTimeInterval(Double(delay.components.seconds)))
         report(connectText, .failed("\(reason) · retry in \(delay.components.seconds) s"))
         retryTask?.cancel()
@@ -167,6 +167,12 @@ final class PhoneConnection {
             guard !Task.isCancelled, let self, self.wantsConnection else { return }
             self.open()
         }
+    }
+
+    /// The wait before the next attempt after `failures` attempts in a row, or nil to give up.
+    static func retryDelay(afterFailures failures: Int) -> Duration? {
+        guard failures < maxAttempts else { return nil }
+        return backoff[min(failures - 1, backoff.count - 1)]
     }
 
     private func closeConnection() {
@@ -178,7 +184,8 @@ final class PhoneConnection {
 
     // MARK: Lines
 
-    private func handle(line: Data) {
+    /// Handles one line from the phone. Internal so tests can feed lines without a socket.
+    func handle(line: Data) {
         switch PhoneLine.decode(line) {
         case .hello(let hello):
             sawHello = true

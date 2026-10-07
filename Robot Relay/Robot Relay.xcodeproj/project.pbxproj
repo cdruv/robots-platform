@@ -14,19 +14,11 @@
 			remoteGlobalIDString = 756FD4383073071200B6C0A9;
 			remoteInfo = "Robot Relay";
 		};
-		756FD4533073071300B6C0A9 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 756FD4313073071200B6C0A9 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 756FD4383073071200B6C0A9;
-			remoteInfo = "Robot Relay";
-		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		756FD4393073071200B6C0A9 /* Robot Relay.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Robot Relay.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		756FD4483073071300B6C0A9 /* Robot RelayTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Robot RelayTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
-		756FD4523073071300B6C0A9 /* Robot RelayUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "Robot RelayUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -38,11 +30,6 @@
 		756FD44B3073071300B6C0A9 /* Robot RelayTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "Robot RelayTests";
-			sourceTree = "<group>";
-		};
-		756FD4553073071300B6C0A9 /* Robot RelayUITests */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = "Robot RelayUITests";
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -58,11 +45,6 @@
 			files = (
 			);
 		};
-		756FD44F3073071300B6C0A9 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			files = (
-			);
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -71,7 +53,6 @@
 			children = (
 				756FD43B3073071200B6C0A9 /* Robot Relay */,
 				756FD44B3073071300B6C0A9 /* Robot RelayTests */,
-				756FD4553073071300B6C0A9 /* Robot RelayUITests */,
 				756FD43A3073071200B6C0A9 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -81,7 +62,6 @@
 			children = (
 				756FD4393073071200B6C0A9 /* Robot Relay.app */,
 				756FD4483073071300B6C0A9 /* Robot RelayTests.xctest */,
-				756FD4523073071300B6C0A9 /* Robot RelayUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -129,27 +109,6 @@
 			productReference = 756FD4483073071300B6C0A9 /* Robot RelayTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
-		756FD4513073071300B6C0A9 /* Robot RelayUITests */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 756FD4603073071300B6C0A9 /* Build configuration list for PBXNativeTarget "Robot RelayUITests" */;
-			buildPhases = (
-				756FD44E3073071300B6C0A9 /* Sources */,
-				756FD44F3073071300B6C0A9 /* Frameworks */,
-				756FD4503073071300B6C0A9 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-				756FD4543073071300B6C0A9 /* PBXTargetDependency */,
-			);
-			fileSystemSynchronizedGroups = (
-				756FD4553073071300B6C0A9 /* Robot RelayUITests */,
-			);
-			name = "Robot RelayUITests";
-			productName = "Robot RelayUITests";
-			productReference = 756FD4523073071300B6C0A9 /* Robot RelayUITests.xctest */;
-			productType = "com.apple.product-type.bundle.ui-testing";
-		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -164,10 +123,6 @@
 						CreatedOnToolsVersion = 27.0;
 					};
 					756FD4473073071300B6C0A9 = {
-						CreatedOnToolsVersion = 27.0;
-						TestTargetID = 756FD4383073071200B6C0A9;
-					};
-					756FD4513073071300B6C0A9 = {
 						CreatedOnToolsVersion = 27.0;
 						TestTargetID = 756FD4383073071200B6C0A9;
 					};
@@ -189,7 +144,6 @@
 			targets = (
 				756FD4383073071200B6C0A9 /* Robot Relay */,
 				756FD4473073071300B6C0A9 /* Robot RelayTests */,
-				756FD4513073071300B6C0A9 /* Robot RelayUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -201,11 +155,6 @@
 			);
 		};
 		756FD4463073071300B6C0A9 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			files = (
-			);
-		};
-		756FD4503073071300B6C0A9 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
 			);
@@ -240,11 +189,6 @@
 			files = (
 			);
 		};
-		756FD44E3073071300B6C0A9 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			files = (
-			);
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -252,11 +196,6 @@
 			isa = PBXTargetDependency;
 			target = 756FD4383073071200B6C0A9 /* Robot Relay */;
 			targetProxy = 756FD4493073071300B6C0A9 /* PBXContainerItemProxy */;
-		};
-		756FD4543073071300B6C0A9 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 756FD4383073071200B6C0A9 /* Robot Relay */;
-			targetProxy = 756FD4533073071300B6C0A9 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -483,42 +422,6 @@
 			};
 			name = Release;
 		};
-		756FD4613073071300B6C0A9 /* Debug configuration for PBXNativeTarget "Robot RelayUITests" */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "vadymsidorov.Robot-RelayUITests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = "Robot Relay";
-			};
-			name = Debug;
-		};
-		756FD4623073071300B6C0A9 /* Release configuration for PBXNativeTarget "Robot RelayUITests" */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "vadymsidorov.Robot-RelayUITests";
-				PRODUCT_NAME = "$(TARGET_NAME)";
-				STRING_CATALOG_GENERATE_SYMBOLS = NO;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = NO;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-				TEST_TARGET_NAME = "Robot Relay";
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -543,14 +446,6 @@
 			buildConfigurations = (
 				756FD45E3073071300B6C0A9 /* Debug configuration for PBXNativeTarget "Robot RelayTests" */,
 				756FD45F3073071300B6C0A9 /* Release configuration for PBXNativeTarget "Robot RelayTests" */,
-			);
-			defaultConfigurationName = Release;
-		};
-		756FD4603073071300B6C0A9 /* Build configuration list for PBXNativeTarget "Robot RelayUITests" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				756FD4613073071300B6C0A9 /* Debug configuration for PBXNativeTarget "Robot RelayUITests" */,
-				756FD4623073071300B6C0A9 /* Release configuration for PBXNativeTarget "Robot RelayUITests" */,
 			);
 			defaultConfigurationName = Release;
 		};

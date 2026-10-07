@@ -122,9 +122,8 @@ final class TelemetryStore {
         ]).prettyPrinted()
     }
 
-    // MARK: Private
-
-    private func ingest(_ event: TelemetryEvent) {
+    /// Adds one event from the stream. Internal so tests can feed events without a service.
+    func ingest(_ event: TelemetryEvent) {
         // seq restarts with every phone session; ids must stay unique.
         if let last = events.last?.seq, event.seq <= last { reset() }
         if originMonoNs == nil { originMonoNs = event.tsMonoNs }
@@ -138,6 +137,8 @@ final class TelemetryStore {
         }
         if !followLive { behindCount += 1 }
     }
+
+    // MARK: Private
 
     private func reset() {
         events = []

@@ -9,7 +9,7 @@ import SwiftUI
 
 @main
 struct Robot_RelayApp: App {
-    @State private var app = AppModel(services: .live())
+    @State private var app = AppModel(services: RobotServices.isTestHost ? .placeholder() : .live())
 
     var body: some Scene {
         WindowGroup {

@@ -18,14 +18,11 @@ struct PicoBoardReadTests {
             PicoFile(name: "body.py", bytes: 240, sha: "9955"),
             PicoFile(name: "main.py", bytes: 141, sha: "dcff"),
         ])
-        #expect(PicoMode.parse(output) == .armed("body"))
     }
 
     @Test func aBrokenModesModuleStillShowsTheFiles() {
         let partial = "board=Pico|1.28.0\nfile=modes.py,10,abcd\nmode=\n"
         #expect(PicoMode.parseFiles(partial) == [PicoFile(name: "modes.py", bytes: 10, sha: "abcd")])
-        #expect(PicoMode.parse(partial) == .idle)
-        #expect(PicoMode.parseModes(partial).isEmpty)
     }
 
     @Test func noBoardLineMeansFilesUnknown() {

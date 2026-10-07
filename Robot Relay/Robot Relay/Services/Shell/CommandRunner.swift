@@ -39,6 +39,7 @@ final class CommandRunner {
         timeout: Duration = .seconds(15),
         judge: (CommandResult) -> LinkActivity.State = { $0.succeeded ? .ok(nil) : .failed($0.failureReason) }
     ) async -> CommandResult {
+        precondition(!RobotServices.isTestHost, "unit tests must not run \(tool)")
         let text = "$ " + Self.displayCommand(tool, arguments)
         report?(LinkActivity(text: text, state: .running))
         let result: CommandResult

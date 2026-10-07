@@ -9,6 +9,10 @@ struct RobotServices {
     var firmware: any FirmwareService
     var drive: any DriveService
 
+    /// True in the app that hosts the unit tests. The host gets placeholder services, and the
+    /// network, USB and process entry points refuse to run, so no test reaches real hardware.
+    nonisolated static let isTestHost = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+
     /// Canned data from the design; nothing touches the network, USB or Bluetooth.
     static func placeholder() -> RobotServices {
         RobotServices(

@@ -14,6 +14,7 @@ final class PicoUSBMonitor {
 
     /// Starts watching and reports the current port if there is one. Callbacks run on the main queue.
     func start() {
+        precondition(!RobotServices.isTestHost, "unit tests must not watch USB")
         guard notificationPort == nil, let notificationPort = IONotificationPortCreate(kIOMainPortDefault) else { return }
         IONotificationPortSetDispatchQueue(notificationPort, .main)
         self.notificationPort = notificationPort
