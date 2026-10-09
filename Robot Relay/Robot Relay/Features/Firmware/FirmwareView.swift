@@ -95,9 +95,9 @@ struct FirmwareFilesCard: View {
         let changed = state.changedFiles.count
         Card {
             CardHeader(
-                title: "Firmware files",
-                note: state.isDefaultFolder ? "repo folder" : "chosen folder",
-                status: !state.hasDevice ? "needs USB" : !state.hasDeviceFiles ? "—" : changed > 0 ? "\(changed) to upload" : "in sync",
+                title: "Firmware source",
+                note: "source folder",
+                status: !state.hasDevice ? "needs USB" : !state.hasDeviceFiles ? "—" : changed > 0 ? "\(changed) changed" : "in sync",
                 isStatusHighlighted: changed > 0
             )
             HStack(spacing: 8) {
@@ -108,19 +108,18 @@ struct FirmwareFilesCard: View {
                     .truncationMode(.head)
                     .help(state.folder)
                 Spacer(minLength: 0)
-                if !state.isDefaultFolder {
-                    Button("Use repo folder") { store.useDefaultFolder() }
-                        .buttonStyle(.nocturneGhost)
-                }
-                Button("Choose…") { isChoosingFolder = true }
+                Button("Change source folder…") { isChoosingFolder = true }
                     .buttonStyle(.nocturneSecondary)
             }
             .disabled(state.isBusy)
             if !state.hasLocalFolder {
-                Text("Folder not found. Choose the folder that holds main.py.")
+                Text("Source folder not found. Select the folder containing main.py and its modules.")
                     .font(.nocturne(11.5))
                     .foregroundStyle(Nocturne.accent300)
             }
+            Text("main.py and its modules")
+                .font(.nocturne(11.5))
+                .foregroundStyle(Nocturne.neutral500)
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 2) {
                 ForEach(state.files) { file in
                     GridRow {
@@ -136,10 +135,10 @@ struct FirmwareFilesCard: View {
             .font(.nocturneMono(11.5))
             .foregroundStyle(Nocturne.neutral500)
 
-            Button(state.isBusy ? "Working…" : changed > 0 ? "Upload \(changed)" : "Upload") { store.upload() }
+            Button(state.isBusy ? "Working…" : "Upload firmware") { store.upload() }
                 .buttonStyle(.nocturnePrimary)
                 .disabled(!store.canUpload)
-            Text("Copies changed files with mpremote fs cp. No reset: new code runs from the next power-on.")
+            Text("Uploads changed Python files from this source folder. New firmware runs at the next power-on.")
                 .font(.nocturne(11.5))
                 .foregroundStyle(Nocturne.neutral500)
                 .lineSpacing(2)

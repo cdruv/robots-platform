@@ -6,7 +6,7 @@ import types
 import unittest
 from unittest.mock import mock_open, patch
 
-FIRMWARE = Path(__file__).resolve().parents[1]
+FIRMWARE = Path(__file__).resolve().parents[1] / "src"
 
 
 class FirmwareTests(unittest.TestCase):

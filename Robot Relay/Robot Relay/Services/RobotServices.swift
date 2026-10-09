@@ -34,7 +34,7 @@ struct RobotServices {
             link: PhoneLinkService(connection: phone, runner: runner, pico: pico),
             telemetry: PhoneTelemetryService(connection: phone),
             live: UnavailableLiveStreamService(),
-            firmware: PicoFirmwareService(pico: pico),
+            firmware: PicoFirmwareService(robotID: "walky", pico: pico),
             drive: PlaceholderDriveService()
         )
     }
@@ -79,7 +79,7 @@ protocol FirmwareService: AnyObject {
     /// Re-reads the local firmware folder. Doesn't touch the board.
     func refreshLocal() async
     /// Uploads from `folder` from now on, remembered across launches; nil returns to the
-    /// repository's firmware folder.
+    /// Documents folder.
     func setFolder(_ folder: URL?) async
     /// Copies the local files that differ from the board's, then reads the board again.
     /// Never resets the board: the new code runs from the next power-on.

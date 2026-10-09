@@ -84,10 +84,6 @@ final class FirmwareStore {
         Task { await service.setFolder(folder) }
     }
 
-    func useDefaultFolder() {
-        Task { await service.setFolder(nil) }
-    }
-
     func upload() {
         Task { await service.upload() }
     }

@@ -7,7 +7,7 @@ final class PlaceholderFirmwareService: FirmwareService {
     private let lines = AsyncStream.makeStream(of: ConsoleLine.self)
 
     init() {
-        var state = FirmwareState(folder: "~/robots/Walky/firmware/pico")
+        var state = FirmwareState(folder: PicoFirmwareService.defaultFolder.path)
         state.port = "/dev/cu.usbmodem14201"
         state.board = "Raspberry Pi Pico 2 W with RP2350"
         state.runtime = "1.28.0"
@@ -36,8 +36,7 @@ final class PlaceholderFirmwareService: FirmwareService {
     func refreshLocal() async {}
 
     func setFolder(_ folder: URL?) async {
-        current.folder = folder?.path ?? "~/robots/Walky/firmware/pico"
-        current.isDefaultFolder = folder == nil
+        current.folder = folder?.path ?? PicoFirmwareService.defaultFolder.path
         publish()
     }
 

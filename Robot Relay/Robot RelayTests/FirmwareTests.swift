@@ -65,27 +65,45 @@ struct FirmwareFileTests {
         #expect(PicoFirmwareService.localFiles(in: folder.appendingPathComponent("missing")) == nil)
     }
 
-    @Test func defaultFolderIsTheRepositoryFirmware() {
-        let names = PicoFirmwareService.localFiles(in: PicoFirmwareService.defaultFolder)?.map(\.name) ?? []
-        #expect(names.contains("main.py"))
-        #expect(names.contains("modes.py"))
+    @Test func defaultFolderIsDocuments() {
+        #expect(PicoFirmwareService.defaultFolder == FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0])
     }
 
     @MainActor
-    @Test func chosenFolderIsRememberedUntilReset() async throws {
-        let defaults = try #require(UserDefaults(suiteName: UUID().uuidString))
-        let chosen = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let service = PicoFirmwareService(pico: PicoUSBLink(runner: CommandRunner()), defaults: defaults)
-        await service.setFolder(chosen)
-        #expect(defaults.string(forKey: PicoFirmwareService.folderKey) == chosen.standardizedFileURL.path)
-        let relaunched = PicoFirmwareService(pico: PicoUSBLink(runner: CommandRunner()), defaults: defaults)
-        var states = relaunched.state().makeAsyncIterator()
-        let state = await states.next()
-        #expect(state?.folder == chosen.standardizedFileURL.path)
-        #expect(state?.isDefaultFolder == false)
-        await relaunched.setFolder(nil)
-        #expect(defaults.string(forKey: PicoFirmwareService.folderKey) == nil)
+    @Test func foldersPersistPerRobotAcrossServiceRecreation() async throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let first = URL(fileURLWithPath: "/tmp/first-firmware")
+        let second = URL(fileURLWithPath: "/tmp/second-firmware")
+        for (robot, folder) in [("first", first), ("second", second)] {
+            let service = PicoFirmwareService(robotID: robot, pico: PicoUSBLink(runner: CommandRunner()), defaults: defaults)
+            await service.setFolder(folder)
+        }
+        let reloadedDefaults = try #require(UserDefaults(suiteName: suite))
+        for (robot, folder) in [("first", first), ("second", second), ("new", PicoFirmwareService.defaultFolder)] {
+            let service = PicoFirmwareService(robotID: robot, pico: PicoUSBLink(runner: CommandRunner()), defaults: reloadedDefaults)
+            var states = service.state().makeAsyncIterator()
+            #expect(await states.next()?.folder == folder.path)
+        }
     }
+
+    @MainActor
+    @Test func preservesLegacySelectionForWalkyOnly() async throws {
+        let suite = UUID().uuidString
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set("/tmp/legacy-firmware", forKey: "firmwareFolder")
+        let other = PicoFirmwareService(robotID: "other", pico: PicoUSBLink(runner: CommandRunner()), defaults: defaults)
+        var otherStates = other.state().makeAsyncIterator()
+        #expect(await otherStates.next()?.folder == PicoFirmwareService.defaultFolder.path)
+        let walky = PicoFirmwareService(robotID: "walky", pico: PicoUSBLink(runner: CommandRunner()), defaults: defaults)
+        var states = walky.state().makeAsyncIterator()
+        #expect(await states.next()?.folder == "/tmp/legacy-firmware")
+        #expect(defaults.string(forKey: "firmwareFolder.walky") == "/tmp/legacy-firmware")
+        #expect(defaults.string(forKey: "firmwareFolder") == nil)
+    }
+
 }
 
 @MainActor

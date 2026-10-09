@@ -1,9 +1,14 @@
-# Walky Pico firmware
+  # Walky Pico firmware
 
 For the Pico 2 W with MicroPython 1.28, Waveshare Pico Servo Driver,
 and standard positional MG90S servos. No GrowBot software or Wi-Fi is used yet.
 
 ## Files
+
+`src/` contains the deployable firmware: `main.py` and its modules.
+Select `src/` as the firmware source folder in Robot Relay; it remembers the
+selection for this robot and uploads changed top-level Python files to the Pico’s filesystem root. Documentation stays here and host
+tests stay in `tests/`.
 
 - `main.py`: the entry point MicroPython runs on every boot. It only calls
   `modes.run()`.
@@ -65,7 +70,7 @@ From this directory:
 
 ```sh
 mpremote fs ls
-mpremote fs cp main.py modes.py servo_check.py body.py :
+mpremote fs cp src/main.py src/modes.py src/servo_check.py src/body.py :
 ```
 
 This replaces existing files with those names. If a `main.py` you want to keep

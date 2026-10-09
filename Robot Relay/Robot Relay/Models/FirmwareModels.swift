@@ -40,8 +40,6 @@ nonisolated struct FirmwareState: Equatable, Sendable {
     /// Where the local firmware lives, and where `mpremote` was found (nil: not found).
     var folder: String
     var tool: String?
-    /// The folder is `Walky/firmware/pico` in the checkout the app was built from.
-    var isDefaultFolder = true
     /// False when the folder is missing; `files` then only lists the board's.
     var hasLocalFolder = false
     /// False until the board's files are read.

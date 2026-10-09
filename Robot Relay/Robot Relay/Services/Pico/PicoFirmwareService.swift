@@ -6,18 +6,9 @@ import Foundation
 /// Its commands go to the Firmware console, not the popover's log. Never resets the board,
 /// so uploaded code runs from the next power-on.
 final class PicoFirmwareService: FirmwareService {
-    /// `Walky/firmware/pico` in the checkout this app was built from.
-    nonisolated static let defaultFolder = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()  // Pico
-        .deletingLastPathComponent()  // Services
-        .deletingLastPathComponent()  // Robot Relay (target)
-        .deletingLastPathComponent()  // Robot Relay (project)
-        .deletingLastPathComponent()  // repository root
-        .appendingPathComponent("Walky/firmware/pico")
+    nonisolated static let defaultFolder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
 
-    /// The folder chosen in the Firmware tab. Unset follows `defaultFolder`. Debug and release
-    /// builds share the bundle identifier, so they share this.
-    static let folderKey = "firmwareFolder"
+    private let folderKey: String
 
     private let pico: PicoUSBLink
     private let runner: CommandRunner
@@ -34,11 +25,18 @@ final class PicoFirmwareService: FirmwareService {
     private let states = AsyncStream.makeStream(of: FirmwareState.self, bufferingPolicy: .bufferingNewest(1))
     private let lines = AsyncStream.makeStream(of: ConsoleLine.self)
 
-    init(pico: PicoUSBLink, defaults: UserDefaults = .standard, runner: CommandRunner = CommandRunner()) {
+    init(robotID: String, pico: PicoUSBLink, defaults: UserDefaults = .standard, runner: CommandRunner = CommandRunner()) {
         self.pico = pico
         self.defaults = defaults
         self.runner = runner
-        folder = defaults.string(forKey: Self.folderKey).map { URL(fileURLWithPath: $0) } ?? Self.defaultFolder
+        folderKey = "firmwareFolder.\(robotID)"
+        // Preserve the previously global selection for the original robot.
+        if robotID == "walky", defaults.string(forKey: folderKey) == nil,
+           let previous = defaults.string(forKey: "firmwareFolder") {
+            defaults.set(previous, forKey: folderKey)
+            defaults.removeObject(forKey: "firmwareFolder")
+        }
+        folder = defaults.string(forKey: folderKey).map { URL(fileURLWithPath: $0) } ?? Self.defaultFolder
         current = FirmwareState(folder: folder.path)
         local = Self.localFiles(in: folder)
         states.continuation.yield(current)
@@ -62,9 +60,9 @@ final class PicoFirmwareService: FirmwareService {
         guard !isBusy else { return }
         let folder = folder?.standardizedFileURL ?? Self.defaultFolder
         if folder == Self.defaultFolder.standardizedFileURL {
-            defaults.removeObject(forKey: Self.folderKey)
+            defaults.removeObject(forKey: folderKey)
         } else {
-            defaults.set(folder.path, forKey: Self.folderKey)
+            defaults.set(folder.path, forKey: folderKey)
         }
         self.folder = folder
         await refreshLocal()
@@ -114,7 +112,6 @@ final class PicoFirmwareService: FirmwareService {
         state.runtime = link.runtime
         state.tool = CommandRunner.resolve("mpremote", environment: ProcessInfo.processInfo.environment)?
             .deletingLastPathComponent().path
-        state.isDefaultFolder = folder.standardizedFileURL == Self.defaultFolder.standardizedFileURL
         state.hasLocalFolder = local != nil
         state.hasDeviceFiles = link.files != nil
         state.files = FirmwareFile.merge(local: local ?? [], device: link.files)
