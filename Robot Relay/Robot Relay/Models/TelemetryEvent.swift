@@ -1,7 +1,7 @@
 import Foundation
 
 /// One telemetry line, matching `TelemetryEvent` in
-/// `Yobot/onboard-android/core/.../telemetry/Telemetry.kt` (NDJSON over TCP :7777).
+/// `Walky/onboard-android/core/.../telemetry/Telemetry.kt` (NDJSON over TCP :7777).
 nonisolated struct TelemetryEvent: Codable, Identifiable, Hashable, Sendable {
     let seq: Int64
     let tsWallMs: Int64

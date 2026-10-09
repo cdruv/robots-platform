@@ -2,7 +2,7 @@ import Foundation
 
 /// The robot's links as shown by the Connection chip and popover.
 nonisolated struct RobotLinks: Equatable, Sendable {
-    var robotName = "Yobot"
+    var robotName = "Walky"
     var phone = PhoneLink()
     var pico = PicoLink()
     var controller = ControllerLink()

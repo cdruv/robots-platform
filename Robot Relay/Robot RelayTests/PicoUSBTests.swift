@@ -9,7 +9,7 @@ struct PicoModeTests {
     }
 
     @Test func ignoresNoiseAroundTheLine() {
-        #expect(PicoMode.parse("Yobot: idle; servo signals off.\n  mode=center \n>>> ") == .armed("center"))
+        #expect(PicoMode.parse("Walky: idle; servo signals off.\n  mode=center \n>>> ") == .armed("center"))
     }
 
     @Test func noLineIsUnknown() {

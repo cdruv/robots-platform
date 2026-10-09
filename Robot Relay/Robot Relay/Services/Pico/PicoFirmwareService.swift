@@ -6,14 +6,14 @@ import Foundation
 /// Its commands go to the Firmware console, not the popover's log. Never resets the board,
 /// so uploaded code runs from the next power-on.
 final class PicoFirmwareService: FirmwareService {
-    /// `Yobot/firmware/pico` in the checkout this app was built from.
+    /// `Walky/firmware/pico` in the checkout this app was built from.
     nonisolated static let defaultFolder = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()  // Pico
         .deletingLastPathComponent()  // Services
         .deletingLastPathComponent()  // Robot Relay (target)
         .deletingLastPathComponent()  // Robot Relay (project)
         .deletingLastPathComponent()  // repository root
-        .appendingPathComponent("Yobot/firmware/pico")
+        .appendingPathComponent("Walky/firmware/pico")
 
     /// The folder chosen in the Firmware tab. Unset follows `defaultFolder`. Debug and release
     /// builds share the bundle identifier, so they share this.
