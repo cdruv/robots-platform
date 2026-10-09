@@ -93,6 +93,7 @@ nonisolated struct PicoLink: Equatable, Sendable {
     var runtime: String?
     /// The board's `.py` files; nil until read.
     var files: [PicoFile]?
+    var calibration: CalibrationSnapshot?
     var railVolts: Double?
     var lastWatchdogReset: Date?
 }

@@ -12,3 +12,5 @@ Custom robot control terminal for macOS. It is used to stream telemetry (logs), 
 Install with `scripts/install_local.sh` (Release build into `/Applications`), or open `Robot Relay.xcodeproj`.
 
 Versioning: bump major.minor by hand in `MARKETING_VERSION` (target › General › Version). The build number (`CFBundleVersion`) is the build time, YYYYMMDD.HHMM, stamped by the target's "Stamp Build Number" phase on every build, from Xcode and `install_local.sh` alike. Read both through `AppVersion`.
+
+- Live leg calibration is an isolated, one-use Pico access-point session prepared over USB. Reserve the USB queue throughout preparation and calibration; no mpremote reads, uploads, or mode changes may interrupt it. Calibration uses acknowledged previews and an explicit save, then closes Wi-Fi and attempts to restore the Mac network. Stored calibration is included in the ordinary single USB snapshot. Never route production driving through this service.

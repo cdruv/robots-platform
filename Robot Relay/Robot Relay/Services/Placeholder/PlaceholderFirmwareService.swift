@@ -63,22 +63,6 @@ final class PlaceholderFirmwareService: FirmwareService {
         emit("ok", .output)
     }
 
-    func writeOffsets(_ offsets: LegOffsets) async {
-        emit("$ mpremote exec \"open('leg_offsets.txt','w').write('\(offsets.left) \(offsets.right)')\"", .command)
-        current.storedOffsets = offsets
-        publish()
-    }
-
-    func centerLegs() async {
-        emit("$ mpremote exec \"center()\"", .command)
-        emit("L 1500µs  R 1500µs", .output)
-    }
-
-    func sweepLegs(degrees: Double) async {
-        emit("$ mpremote exec \"sweep(\(Fmt.trimmed(degrees)))\"", .command)
-        emit("sweep ±\(Fmt.trimmed(degrees))° done; servos released", .output)
-    }
-
     private func publish() {
         states.continuation.yield(current)
     }

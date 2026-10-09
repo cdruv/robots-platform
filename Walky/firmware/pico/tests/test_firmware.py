@@ -64,13 +64,18 @@ class FirmwareTests(unittest.TestCase):
         sys.path.insert(0, str(FIRMWARE))
         try:
             with patch.dict(sys.modules, machine=machine):
-                for name in ('modes', 'servo_check', 'body'):
+                for name in ('modes', 'servo_check', 'body', 'calibration', 'servo_output', 'calibration_session'):
                     sys.modules.pop(name, None)
                 self.modes = importlib.import_module('modes')
                 self.check = sys.modules['servo_check']
                 self.body = sys.modules['body']
+                self.calibration = sys.modules['calibration']
+                self.output = sys.modules['servo_output']
         finally:
             sys.path.remove(str(FIRMWARE))
+        self.addCleanup(patch.stopall)
+        patch.object(self.calibration, 'load', return_value=((0, 0), False)).start()
+        patch.object(self.calibration, 'consume_request', return_value=None).start()
         self.check.time = types.SimpleNamespace(
             ticks_ms=lambda: owner.clock, ticks_add=lambda a, b: a + b,
             ticks_diff=lambda a, b: a - b, sleep_ms=sleep_ms)
@@ -174,6 +179,40 @@ class FirmwareTests(unittest.TestCase):
                 self.modes.run()
         self.assertEqual((self.outputs, self.body_runs), ([], 0))
 
+    def test_trimmed_center_and_sweep_stay_in_final_envelope(self):
+        self.calibration.load.return_value = ((-18, 1), True)
+        self.boot('once:sweep')
+        self.assertTrue(all(1400000 <= v <= 1600000 for _, v in self.pulses))
+        self.assertEqual([v for p, v in self.pulses if p == 0][-1], 1401000)
+        self.assertEqual([v for p, v in self.pulses if p == 1][-1], 1506000)
+        self.assert_released()
+
+    def test_calibration_overrides_without_consuming_normal_mode(self):
+        request = {'session': 'test'}
+        self.calibration.consume_request.return_value = request
+        calls = []
+        fake = types.SimpleNamespace(run=lambda value: calls.append(value))
+        with patch.dict(sys.modules, calibration_session=fake), patch.object(self.modes, 'consume') as consume:
+            self.modes.run()
+        consume.assert_not_called()
+        self.assertEqual(calls, [request])
+        self.assertEqual(self.pulses, [])
+
+    def test_watchdog_boot_preserves_all_requests(self):
+        self.cause = 3
+        with patch.object(self.modes, 'consume') as consume:
+            self.modes.run()
+        consume.assert_not_called()
+        self.calibration.consume_request.assert_not_called()
+        self.assertEqual(self.pulses, [])
+
+    def test_corrupt_calibration_prevents_pwm(self):
+        self.calibration.load.side_effect = ValueError('invalid storage')
+        with self.assertRaises(ValueError):
+            self.boot('once:center')
+        self.assertEqual(self.pulses, [])
+        self.assert_released()
+
     def test_main_py_only_runs_modes(self):
         calls = []
         fake = types.SimpleNamespace(run=lambda: calls.append('run'))
@@ -185,7 +224,7 @@ class FirmwareTests(unittest.TestCase):
     def test_pulse_outside_bounds_rejected(self):
         for value in (1399, 1601):
             with self.assertRaises(ValueError):
-                self.check.write_us(None, value)
+                self.output.pulse_us(value, 0)
 
 
 if __name__ == '__main__':

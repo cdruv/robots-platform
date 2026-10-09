@@ -52,6 +52,7 @@ nonisolated struct FirmwareState: Equatable, Sendable {
     /// An upload or mode change is running.
     var isBusy = false
     /// nil: leg calibration isn't on the board yet.
+    var calibration: CalibrationSnapshot?
     var storedOffsets: LegOffsets?
 
     init(folder: String = "") {
@@ -76,7 +77,7 @@ nonisolated enum LegSide: CaseIterable, Sendable {
 
 /// Per-leg trim in degrees from neutral 90.
 nonisolated struct LegOffsets: Equatable, Sendable {
-    static let range: ClosedRange<Double> = -15...15
+    static let range: ClosedRange<Double> = -9...9
     static let step = 0.5
 
     var left: Double
@@ -95,7 +96,7 @@ nonisolated enum ServoMath {
     static let microsPerDegree = 11.0
 
     static func pulseMicros(offsetDegrees: Double) -> Int {
-        Int((centerMicros + offsetDegrees * microsPerDegree).rounded())
+        Int(centerMicros) + Int((offsetDegrees * microsPerDegree).rounded(.toNearestOrAwayFromZero))
     }
 }
 

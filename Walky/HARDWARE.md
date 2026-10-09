@@ -4,7 +4,7 @@
 
 Walky is a small, two legged robot with a vertically oriented, rectangular chassis. Its 3D printed body shell (163 × 75 × 25 mm) mounts onto a slightly larger backplate (168 × 80 × 23 mm), enclosing the electronics. A Pixel 8 mounts on the front in portrait orientation, with its screen facing outward, so only front camera is accessible.
 
-Two identical legs (84.5 × 21 × 13 mm), each approximately half the chassis height, attach to independent servos on the left and right sides of the body. The servo shafts point outward, forming a horizontal rotation axis across the robot. Each leg can swing forward or backward around this axis in 360°.
+Two identical legs (84.5 × 21 × 13 mm), each approximately half the chassis height, attach to independent servos on the left and right sides of the body. The servo shafts point outward, forming a horizontal rotation axis across the robot. Each leg swings through a 180° arc behind the robot, opposite the phone screen/face, from pointing down through horizontal at servo center to pointing up.
 
 
 
@@ -30,4 +30,3 @@ perspective). The Pico generates the PWM.
 - Servo power comes from the supply rail, not a Pico GPIO pin; the Pico and servos  
 share ground. The servo supply target is 5–6 V with at least 2 A  
 available.
-

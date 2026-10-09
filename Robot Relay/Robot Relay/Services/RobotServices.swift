@@ -8,6 +8,7 @@ struct RobotServices {
     var live: any LiveStreamService
     var firmware: any FirmwareService
     var drive: any DriveService
+    var calibration: CalibrationController? = nil
 
     /// True in the app that hosts the unit tests. The host gets placeholder services, and the
     /// network, USB and process entry points refuse to run, so no test reaches real hardware.
@@ -35,7 +36,10 @@ struct RobotServices {
             telemetry: PhoneTelemetryService(connection: phone),
             live: UnavailableLiveStreamService(),
             firmware: PicoFirmwareService(robotID: "walky", pico: pico),
-            drive: PlaceholderDriveService()
+            drive: PlaceholderDriveService(),
+            calibration: CalibrationController(board: PicoCalibrationBoard(pico: pico), wifi: MacCalibrationWiFi(),
+                transport: CalibrationTCPTransport(), storage: CalibrationKeychain(),
+                permission: { try await CalibrationLocationPermission().request() })
         )
     }
 }
@@ -70,7 +74,7 @@ protocol LiveStreamService: AnyObject {
     func setMuted(_ isMuted: Bool) async
 }
 
-/// Pico firmware and board configuration over `mpremote`: upload, power-on mode, calibration.
+/// Pico firmware and board configuration over `mpremote`; live calibration is separate.
 protocol FirmwareService: AnyObject {
     /// Current state followed by every change. Single consumer.
     func state() -> AsyncStream<FirmwareState>
@@ -79,7 +83,7 @@ protocol FirmwareService: AnyObject {
     /// Re-reads the local firmware folder. Doesn't touch the board.
     func refreshLocal() async
     /// Uploads from `folder` from now on, remembered across launches; nil returns to the
-    /// Documents folder.
+    /// repository's firmware folder.
     func setFolder(_ folder: URL?) async
     /// Copies the local files that differ from the board's, then reads the board again.
     /// Never resets the board: the new code runs from the next power-on.
@@ -87,9 +91,6 @@ protocol FirmwareService: AnyObject {
     /// Writes `mode` (one of `FirmwareState.modes`) to `mode.txt`; nil deletes the file, so
     /// power-on runs nothing. Nothing moves until the next power-on.
     func setBootMode(_ mode: String?) async
-    func writeOffsets(_ offsets: LegOffsets) async
-    func centerLegs() async
-    func sweepLegs(degrees: Double) async
 }
 
 /// Manual driving from a game controller. Not designed yet.

@@ -8,16 +8,19 @@ final class FirmwareStore {
     /// The power-on menu's choice: a mode, or "" for nothing. nil follows the board.
     var bootSelection: String?
 
-    /// The offsets being edited, starting from the stored ones (or neutral when unknown).
-    var offsets = LegOffsets(left: 0, right: 0)
-
     private(set) var consoleLines: [ConsoleLine] = []
+
+    let calibration: CalibrationController?
 
     private let service: any FirmwareService
     private var tasks: [Task<Void, Never>] = []
 
-    init(service: any FirmwareService) {
+    init(service: any FirmwareService, calibration: CalibrationController? = nil) {
+        self.calibration = calibration
         self.service = service
+        calibration?.log = { [weak self] text in
+            self?.consoleLines.append(ConsoleLine(text: text, kind: .output))
+        }
     }
 
     func start() {
@@ -36,12 +39,7 @@ final class FirmwareStore {
 
     var hasDevice: Bool { state.hasDevice }
 
-    var storedOffsets: LegOffsets? { state.storedOffsets }
-
-    /// Calibration needs the board to report stored offsets, which it doesn't yet.
-    var canCalibrate: Bool { hasDevice && storedOffsets != nil && !state.isBusy }
-
-    var canUpload: Bool { hasDevice && !state.isBusy && !state.changedFiles.isEmpty }
+    var canUpload: Bool { hasDevice && calibration?.blocksUSB != true && !state.isBusy && !state.changedFiles.isEmpty }
 
     /// What `mode.txt` holds now: a mode, or "" for none. nil until read.
     var currentBoot: String? {
@@ -64,16 +62,7 @@ final class FirmwareStore {
     }
 
     var canApplyBoot: Bool {
-        hasDevice && !state.isBusy && !state.modes.isEmpty && currentBoot != nil && selectedBoot != currentBoot
-    }
-
-    var unsavedOffsetCount: Int {
-        LegSide.allCases.count { isUnsaved($0) }
-    }
-
-    func isUnsaved(_ side: LegSide) -> Bool {
-        guard let storedOffsets else { return false }
-        return offsets[side] != storedOffsets[side]
+        hasDevice && calibration?.blocksUSB != true && !state.isBusy && !state.modes.isEmpty && currentBoot != nil && selectedBoot != currentBoot
     }
 
     func refreshLocal() {
@@ -85,6 +74,7 @@ final class FirmwareStore {
     }
 
     func upload() {
+        guard canUpload else { return }
         Task { await service.upload() }
     }
 
@@ -95,25 +85,11 @@ final class FirmwareStore {
         Task { await service.setBootMode(mode.isEmpty ? nil : mode) }
     }
 
-    func writeOffsets() {
-        let offsets = offsets
-        Task { await service.writeOffsets(offsets) }
-    }
-
-    func centerLegs() {
-        Task { await service.centerLegs() }
-    }
-
-    func sweepLegs() {
-        Task { await service.sweepLegs(degrees: 10) }
-    }
-
     func clearConsole() {
         consoleLines.removeAll()
     }
 
     private func apply(_ new: FirmwareState) {
-        if state.storedOffsets == nil, let stored = new.storedOffsets { offsets = stored }
         state = new
     }
 }

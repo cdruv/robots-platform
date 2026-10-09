@@ -57,7 +57,7 @@ final class PicoFirmwareService: FirmwareService {
     }
 
     func setFolder(_ folder: URL?) async {
-        guard !isBusy else { return }
+        guard !pico.calibrationReserved, !isBusy else { return }
         let folder = folder?.standardizedFileURL ?? Self.defaultFolder
         if folder == Self.defaultFolder.standardizedFileURL {
             defaults.removeObject(forKey: folderKey)
@@ -71,7 +71,7 @@ final class PicoFirmwareService: FirmwareService {
     func upload() async {
         await refreshLocal()
         let names = current.changedFiles.map(\.name)
-        guard !isBusy, !names.isEmpty else { return }
+        guard !pico.calibrationReserved, !isBusy, !names.isEmpty else { return }
         let paths = names.map { folder.appendingPathComponent($0).path }
         await busy {
             await pico.withBoard(reportingTo: runner) { [runner] port in
@@ -84,7 +84,7 @@ final class PicoFirmwareService: FirmwareService {
 
     func setBootMode(_ mode: String?) async {
         if let mode, !link.modes.contains(mode) { return }
-        guard !isBusy else { return }
+        guard !pico.calibrationReserved, !isBusy else { return }
         let script = mode.map(PicoMode.armScript) ?? PicoMode.disarmScript
         await busy {
             await pico.withBoard(reportingTo: runner) { [runner] port in
@@ -92,10 +92,6 @@ final class PicoFirmwareService: FirmwareService {
             }
         }
     }
-
-    func writeOffsets(_ offsets: LegOffsets) async {}
-    func centerLegs() async {}
-    func sweepLegs(degrees: Double) async {}
 
     private func busy(_ work: () async -> Void) async {
         isBusy = true
@@ -117,7 +113,9 @@ final class PicoFirmwareService: FirmwareService {
         state.files = FirmwareFile.merge(local: local ?? [], device: link.files)
         state.bootMode = link.arm
         state.modes = link.modes
-        state.isBusy = isBusy
+        state.isBusy = isBusy || pico.calibrationReserved
+        state.calibration = link.calibration
+        state.storedOffsets = link.calibration?.offsets
         current = state
     }
 

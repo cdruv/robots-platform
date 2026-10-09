@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import AppKit
 
 /// Firmware files, power-on mode and leg offsets on the left; the commands run on the right.
 struct FirmwareView: View {
@@ -11,12 +12,13 @@ struct FirmwareView: View {
         VStack(spacing: 0) {
             ViewHeader("Firmware", subtitle: Self.subtitle(state))
             HStack(alignment: .top, spacing: 14) {
-                VStack(spacing: 12) {
-                    if !state.hasDevice { USBRequiredCard() }
+                ScrollView {
+                  VStack(spacing: 12) {
+                    if !state.hasDevice && store.calibration?.blocksUSB != true { USBRequiredCard() }
                     FirmwareFilesCard(store: store)
                     PowerOnModeCard(store: store)
                     LegOffsetsCard(store: store)
-                    Spacer(minLength: 0)
+                  }
                 }
                 .frame(maxWidth: .infinity)
                 FirmwareConsole(store: store)
@@ -39,7 +41,7 @@ struct FirmwareView: View {
     }
 }
 
-/// Shown instead of guessing: everything in this tab runs over USB.
+/// USB prepares calibration; live adjustments use a temporary Wi-Fi session.
 private struct USBRequiredCard: View {
     var body: some View {
         Card {
@@ -51,7 +53,7 @@ private struct USBRequiredCard: View {
             }
             Text("""
                 Connect the Pico 2 W with a USB data cable. Uploading, the power-on mode and \
-                calibration all go over USB with mpremote; this tab updates as soon as it's plugged in.
+                calibration preparation use USB. Live leg calibration temporarily switches Mac Wi-Fi to the Pico.
                 """)
                 .font(.nocturne(11.5))
                 .foregroundStyle(Nocturne.neutral500)
@@ -217,56 +219,84 @@ struct LegOffsetsCard: View {
     @Bindable var store: FirmwareStore
 
     var body: some View {
-        let unsaved = store.unsavedOffsetCount
         Card {
-            CardHeader(
-                title: "Leg offsets",
-                note: "° from neutral 90 · ±\(Int(LegOffsets.range.upperBound))",
-                status: !store.hasDevice ? "needs USB" : store.storedOffsets == nil ? "not on the board yet" : unsaved > 0 ? "\(unsaved) unsaved" : "saved",
-                isStatusHighlighted: unsaved > 0
-            )
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+            CardHeader(title: "Leg calibration", note: "approximate ° · ±9", status: store.calibration?.phase.rawValue ?? "unavailable")
+            let snapshot = store.state.calibration
+            if let error = snapshot?.error {
+                Text("Stored calibration error: " + error).foregroundStyle(Nocturne.accent300)
+            }
+            if let stored = snapshot?.offsets, store.hasDevice {
+                Text("USB stored: L \(Fmt.signed(stored.left))° · R \(Fmt.signed(stored.right))° · \(snapshot?.stored == true ? "calibrated" : "not calibrated")")
+                    .font(.nocturneMono(11))
+            }
+            if let calibration = store.calibration {
+                CalibrationControls(controller: calibration, usbConnected: store.hasDevice, canPrepare: store.hasDevice && !store.state.isBusy && snapshot?.supported == true,
+                                    prepare: { calibration.prepare(snapshot: snapshot) })
+            }
+            if store.hasDevice && snapshot == nil {
+                Text("Upload firmware to enable calibration.")
+            }
+        }
+        .font(.nocturne(11.5))
+        .foregroundStyle(Nocturne.neutral500)
+    }
+}
+
+private struct CalibrationControls: View {
+    @Bindable var controller: CalibrationController
+    let usbConnected: Bool
+    let canPrepare: Bool
+    let prepare: () -> Void
+
+    var body: some View {
+        Text("Calibration temporarily switches Mac Wi-Fi to the robot and disconnects afterwards. Internet and phone telemetry may be interrupted.")
+            .fixedSize(horizontal: false, vertical: true)
+        if !controller.message.isEmpty {
+            Text(controller.message)
+                .foregroundStyle(controller.phase == .error ? Nocturne.accent300 : Nocturne.neutral300)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        if let recovery = controller.recovery {
+            Text(recovery).foregroundStyle(Nocturne.accent300)
+            Button("Open Wi-Fi Settings") {
+                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension")!)
+            }.buttonStyle(.nocturneSecondary)
+        }
+        if controller.phase == .adjusting || controller.phase == .saving {
+            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
                 ForEach(LegSide.allCases, id: \.self) { side in
                     GridRow {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(side.label)
-                                .font(.nocturne(12))
-                            Text(side.pin)
-                                .font(.nocturneMono(10.5))
-                                .foregroundStyle(Nocturne.neutral600)
-                        }
-                        OffsetStepper(value: $store.offsets[side], step: LegOffsets.step, range: LegOffsets.range)
-                        pulseLabel(side)
-                            .font(.nocturneMono(11))
-                            .foregroundStyle(Nocturne.neutral500)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text(side.label + " · " + side.pin)
+                        OffsetStepper(value: $controller.offsets[side], step: LegOffsets.step, range: LegOffsets.range)
+                        let index = side == .left ? 0 : 1
+                        Text(controller.pulses.indices.contains(index) ? "\(controller.pulses[index]) µs applied" : "awaiting reply")
                     }
                 }
             }
-            .disabled(!store.canCalibrate)
-            HStack(spacing: 8) {
-                Button("Center") { store.centerLegs() }
-                    .buttonStyle(.nocturneSecondary)
-                Button("Sweep ±10°") { store.sweepLegs() }
-                    .buttonStyle(.nocturneSecondary)
-                Spacer(minLength: 0)
-                Button("Write offsets") { store.writeOffsets() }
-                    .buttonStyle(.nocturnePrimary)
-                    .disabled(unsaved == 0)
+            .disabled(controller.phase != .adjusting)
+            if let saved = controller.saved {
+                Text("Saved: L \(Fmt.signed(saved.left))° · R \(Fmt.signed(saved.right))°" + (controller.isStored ? "" : " · not calibrated"))
             }
-            .disabled(!store.canCalibrate)
+            Text(controller.offsets != controller.applied ? "Preview pending acknowledgement" : "Preview applied; Save & finish persists both offsets.")
         }
-    }
-
-    private func pulseLabel(_ side: LegSide) -> Text {
-        let pulse = "\(ServoMath.pulseMicros(offsetDegrees: store.offsets[side])) µs · "
-        guard let stored = store.storedOffsets else { return Text(pulse + "stored —") }
-        if stored[side] != store.offsets[side] {
-            let label = "stored \(Fmt.signed(stored[side]))"
-            return Text("\(pulse)\(Text(label).foregroundStyle(Nocturne.accent300))")
+        HStack {
+            if !controller.blocksUSB {
+                Button("Prepare calibration", action: prepare)
+                    .buttonStyle(.nocturnePrimary).disabled(!canPrepare)
+            }
+            if controller.phase == .awaitingBoot {
+                Button("Connect over Wi-Fi") { controller.connect() }
+                    .buttonStyle(.nocturnePrimary).disabled(usbConnected)
+            }
+            if controller.phase == .adjusting {
+                Button("Save & finish") { controller.saveAndFinish() }.buttonStyle(.nocturnePrimary)
+            }
+            if controller.blocksUSB {
+                Button("Cancel & disconnect") { controller.cancel() }
+                    .buttonStyle(.nocturneSecondary)
+                    .disabled(controller.phase == .saving || controller.phase == .finishing)
+            }
         }
-        return Text(pulse + "saved")
     }
 }
 
@@ -274,7 +304,7 @@ struct FirmwareConsole: View {
     let store: FirmwareStore
 
     var body: some View {
-        Tile(caption: "Console", value: "mpremote") {
+        Tile(caption: "Console", value: "USB · calibration Wi-Fi") {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {

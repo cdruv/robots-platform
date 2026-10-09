@@ -24,3 +24,5 @@ The body protocol gives walking and other motions an explicit priority.
 - Train deployed policies only on observations the mounted Pixel 8 can produce.
 Record sensor axes and units, phone orientation, observation history,
 action-to-servo mapping, body geometry, and control rate with each policy.
+
+- All servo motion, including firmware actions and Android-originated commands, must apply persisted per-leg calibration exactly once in the Pico’s final output layer before enforcing PWM limits.

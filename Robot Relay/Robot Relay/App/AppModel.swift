@@ -16,7 +16,7 @@ final class AppModel {
         connection = ConnectionStore(service: services.link)
         live = LiveRobotStore(service: services.live)
         telemetry = TelemetryStore(service: services.telemetry)
-        firmware = FirmwareStore(service: services.firmware)
+        firmware = FirmwareStore(service: services.firmware, calibration: services.calibration)
         drive = services.drive
     }
 
