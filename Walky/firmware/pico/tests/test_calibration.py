@@ -1,199 +1,152 @@
-"""Storage/protocol tests never import real MicroPython hardware."""
-import importlib
 import json
 import os
-from pathlib import Path
-import sys
-import tempfile
-import types
-import unittest
-from unittest.mock import patch
-
-FIRMWARE = Path(__file__).resolve().parents[1] / "src"
+import machine
+from support import fresh, write, read, raises, replace, released, ticket, FilesystemFault
 
 
-class CalibrationTests(unittest.TestCase):
-    def setUp(self):
-        self.directory = tempfile.TemporaryDirectory()
-        self.addCleanup(self.directory.cleanup)
-        old = os.getcwd()
-        os.chdir(self.directory.name)
-        self.addCleanup(os.chdir, old)
-        sys.path.insert(0, str(FIRMWARE))
-        self.addCleanup(sys.path.remove, str(FIRMWARE))
-        hardware = types.SimpleNamespace(Pin=lambda *a, **k: None, PWM=None, unique_id=lambda: b'board')
-        with patch.dict(sys.modules, machine=hardware):
-            for name in ('calibration', 'servo_output', 'calibration_session'):
-                sys.modules.pop(name, None)
-            self.cal = importlib.import_module('calibration')
-            self.output = importlib.import_module('servo_output')
-            self.session = importlib.import_module('calibration_session')
-        self.ticket = dict(version=1, board='626f617264', session='a' * 32,
-                           password='b' * 32, ssid='Walky-Cal-test')
-        self.addCleanup(patch.stopall)
-        patch.object(self.cal, 'board_id', return_value=self.ticket['board']).start()
+def test_rounding_limits_and_pair_validation():
+    import calibration as cal
+    import servo_output
+    assert [cal.trim_us(v) for v in (-18, -1, 0, 1, 18)] == [-99, -6, 0, 6, 99]
+    assert servo_output.pulse_us(1500, -1) == 1494
+    for value in ([19, 0], [0], [True, 0], [0.5, 0], None):
+        with raises(ValueError):
+            cal.validate_steps(value)
+    for nominal, step in ((1502, 18), (1498, -18)):
+        with raises(ValueError):
+            servo_output.pulse_us(nominal, step)
 
-    def test_rounding_limits_and_pair_validation(self):
-        self.assertEqual([self.cal.trim_us(v) for v in (-18, -1, 0, 1, 18)], [-99, -6, 0, 6, 99])
-        self.assertEqual(self.output.pulse_us(1500, -1), 1494)
-        for value in ([19, 0], [0], [True, 0], [0.5, 0], None):
-            with self.assertRaises(ValueError): self.cal.validate_steps(value)
-        with self.assertRaises(ValueError): self.output.pulse_us(1502, 18)
-        with self.assertRaises(ValueError): self.output.pulse_us(1498, -18)
 
-    def test_storage_missing_saved_corrupt_unknown(self):
-        self.assertEqual(self.cal.load(), ((0, 0), False))
-        self.cal.save((-1, 18))
-        self.assertEqual(self.cal.load(), ((-1, 18), True))
-        for data in ('{', '{"version":2,"steps":[0,0]}', '{"version":1,"steps":[100,0]}'):
-            Path(self.cal.FILE).write_text(data)
-            with self.assertRaises(ValueError): self.cal.load()
-            self.assertIn('error', self.cal.snapshot())
+def test_storage_missing_saved_corrupt_unknown():
+    import calibration as cal
+    assert cal.load() == ((0, 0), False)
+    cal.save((-1, 18))
+    assert cal.load() == ((-1, 18), True)
+    for data in ('{', '{"version":2,"steps":[0,0]}', '{"version":1,"steps":[100,0]}'):
+        write(cal.FILE, data)
+        with raises(ValueError):
+            cal.load()
+        assert 'error' in cal.snapshot()
 
-    def test_failed_replacement_preserves_last_save(self):
-        self.cal.save((2, 3))
-        with patch.object(self.cal.os, 'rename', side_effect=OSError('power loss')):
-            with self.assertRaises(OSError): self.cal.save((4, 5))
-        self.assertEqual(self.cal.load(), ((2, 3), True))
 
-    def test_request_validation_on_micropython_strings(self):
-        class MicroString(str):
-            def __iter__(self):
-                return (MicroString(c) for c in super().__iter__())
-            def isalnum(self):
-                raise AttributeError("'str' object has no attribute 'isalnum'")
-        request = {key: MicroString(value) if isinstance(value, str) else value
-                   for key, value in self.ticket.items()}
-        self.cal.arm(request)
-        self.assertEqual(self.cal.consume_request(), self.ticket)
-        for value in ('é' * 32, 'a' * 31 + '!', 'a' * 31 + ' '):
-            with self.assertRaises(ValueError):
-                self.cal.validate_request(dict(self.ticket, password=value))
+def test_failed_replacement_preserves_last_save():
+    import calibration as cal
+    cal.save((2, 3))
+    with replace(cal, 'os', FilesystemFault('rename')):
+        with raises(OSError):
+            cal.save((4, 5))
+    assert cal.load() == ((2, 3), True)
 
-    def test_request_consumed_without_touching_mode(self):
-        Path('mode.txt').write_text('once:sweep')
-        self.cal.arm(self.ticket)
-        self.assertEqual(self.cal.consume_request(), self.ticket)
-        self.assertIsNone(self.cal.consume_request())
-        self.assertEqual(Path('mode.txt').read_text(), 'once:sweep')
-        Path(self.cal.REQUEST_FILE).write_text('{')
-        with self.assertRaises(ValueError): self.cal.consume_request()
-        self.assertFalse(Path(self.cal.REQUEST_FILE).exists())
 
-    def protocol(self):
-        class Servos:
-            steps = None
-            closed = False
-            def center(self, steps): self.steps = steps
-            def close(self): self.closed = True
-        servos = Servos()
-        return self.session.Session(self.ticket, servos), servos
+def test_request_validation_on_micropython_strings():
+    import calibration as cal
+    # Actual MicroPython strings, no compatibility shim: catches isalnum regressions.
+    cal.arm(ticket())
+    assert cal.consume_request() == ticket()
+    for value in ('é' * 32, 'a' * 31 + '!', 'a' * 31 + ' '):
+        with raises(ValueError):
+            cal.validate_request(dict(ticket(), password=value))
 
-    def message(self, command, id=0, **kwargs):
-        return dict(version=1, board=self.ticket['board'], session=self.ticket['session'],
-                    id=id, command=command, **kwargs)
 
-    def test_preview_is_atomic_volatile_and_save_persists(self):
-        session, servos = self.protocol()
-        session.handle(self.message('hello'))
-        reply = session.handle(self.message('preview', 1, steps=[-1, 18]))
-        self.assertEqual(reply['pulses'], [1494, 1599])
-        self.assertEqual(self.cal.load(), ((0, 0), False))
-        with self.assertRaises(ValueError): session.handle(self.message('preview', 2, steps=[0, 19]))
-        self.assertEqual(servos.steps, (-1, 18))
-        reply = session.handle(self.message('save', 3))
-        self.assertTrue(reply['finished'])
-        self.assertTrue(servos.closed)
-        self.assertEqual(self.cal.load(), ((-1, 18), True))
+def test_request_consumed_without_touching_mode():
+    import calibration as cal
+    write('mode.txt', 'once:sweep')
+    cal.arm(ticket())
+    assert cal.consume_request() == ticket()
+    assert cal.consume_request() is None
+    assert read('mode.txt') == 'once:sweep'
+    write(cal.REQUEST_FILE, '{')
+    with raises(ValueError):
+        cal.consume_request()
+    assert cal.REQUEST_FILE not in os.listdir()
 
-    def test_cancel_discards_preview(self):
-        session, servos = self.protocol()
-        session.handle(self.message('hello'))
-        session.handle(self.message('preview', 1, steps=[3, 4]))
-        session.handle(self.message('cancel', 2))
-        self.assertTrue(servos.closed)
-        self.assertEqual(self.cal.load(), ((0, 0), False))
 
-    def test_handshake_identity_replay_unknown_commands(self):
-        for message in (self.message('preview', steps=[0, 0]), [],
-                        dict(self.message('hello'), session='wrong'), self.message('drive')):
-            session, _ = self.protocol()
-            with self.assertRaises(ValueError): session.handle(message)
-        session, _ = self.protocol()
-        session.handle(self.message('hello'))
-        with self.assertRaises(ValueError): session.handle(self.message('heartbeat'))
-        with self.assertRaises(ValueError): session.handle(self.message('drive', 1))
+def message(command, id=0, **kwargs):
+    request = ticket()
+    return dict(version=1, board=request['board'], session=request['session'],
+                id=id, command=command, **kwargs)
 
-    def test_deadlines(self):
-        with patch.object(self.session, 'time', types.SimpleNamespace(ticks_diff=lambda a, b: a-b)):
-            self.assertFalse(self.session.expired(59999, 0, 0, False))
-            self.assertTrue(self.session.expired(60000, 0, 0, False))
-            self.assertFalse(self.session.expired(1999, 0, 0, True))
-            self.assertTrue(self.session.expired(2000, 0, 0, True))
-            self.assertTrue(self.session.expired(600000, 0, 599999, True))
 
-    def run_network(self, messages, no_client=False):
-        clock = [0]
-        state = {'released': False, 'reset': False, 'closed': False, 'ap': False}
-        owner = self
-        class Servos:
-            def __init__(self, steps): self.steps = steps
-            def center(self, steps=None):
-                if steps is not None: self.steps = steps
-            def close(self): state['released'] = True
-        class WLAN:
-            IF_STA, IF_AP, SEC_WPA_WPA2 = 0, 1, 4194308
-            def __init__(self, interface): self.interface = interface
-            def active(self, value):
-                if self.interface == self.IF_AP: state['ap'] = value
-            def config(self, **kwargs):
-                assert kwargs['security'] == self.SEC_WPA_WPA2
-            def ifconfig(self, value): pass
-        class Client:
-            def setblocking(self, value): pass
-            def recv(self, size):
-                if messages: return messages.pop(0)
-                raise OSError(11)
-            def send(self, data): return len(data)
-            def close(self): state['closed'] = True
-        class Listener(Client):
-            def setsockopt(self, *args): pass
-            def bind(self, *args): pass
-            def listen(self, *args): pass
-            def accept(self):
-                if no_client: raise OSError(11)
-                return Client(), None
-        class Pin:
-            OUT = 1
-            def __init__(self, *args): pass
-            def toggle(self): pass
-            def on(self): pass
-            def off(self): pass
-        class WDT:
-            def __init__(self, timeout): assert timeout == 2000
-            def feed(self): pass
-        def wait(ms, watchdog=None): clock[0] += ms
-        def reset(): state['reset'] = True
-        machine = types.SimpleNamespace(Pin=Pin, WDT=WDT, reset=reset)
-        modules = dict(machine=machine, network=types.SimpleNamespace(WLAN=WLAN),
-                       socket=types.SimpleNamespace(socket=Listener, SOL_SOCKET=1, SO_REUSEADDR=2),
-                       servo_check=types.SimpleNamespace(wait_ms=wait))
-        fake_time = types.SimpleNamespace(ticks_ms=lambda: clock[0], ticks_diff=lambda a,b:a-b, sleep_ms=wait)
-        with patch.dict(sys.modules, modules), patch.object(self.session, 'Servos', Servos), patch.object(self.session, 'time', fake_time):
-            try:
-                self.session.run(self.ticket)
-            except (OSError, ValueError):
-                pass
-        self.assertTrue(state['released'])
-        self.assertTrue(state['reset'])
-        self.assertFalse(state['ap'])
-        return state, clock[0]
+def protocol():
+    import calibration_session
+    from servo_output import Servos
+    servos = Servos((0, 0))
+    return calibration_session.Session(ticket(), servos), servos
 
-    def test_network_cleanup_on_cancel_disconnect_malformed_and_timeout(self):
-        hello = (json.dumps(self.message('hello')) + '\n').encode()
-        cancel = (json.dumps(self.message('cancel', 1)) + '\n').encode()
-        for messages in ([hello, cancel], [hello, b''], [b'{bad\n'], [b'x'*1025], [hello]):
-            with self.subTest(messages=messages):
-                self.run_network(list(messages))
-        _, elapsed = self.run_network([], no_client=True)
-        self.assertGreaterEqual(elapsed, 65000)
+
+def test_preview_is_atomic_volatile_and_save_persists():
+    import calibration as cal
+    session, servos = protocol()
+    session.handle(message('hello'))
+    reply = session.handle(message('preview', 1, steps=[-1, 18]))
+    assert reply['pulses'] == [1494, 1599]
+    assert cal.load() == ((0, 0), False)
+    previous = list(machine.pulses)
+    with raises(ValueError):
+        session.handle(message('preview', 2, steps=[0, 19]))
+    assert machine.pulses == previous
+    assert servos.steps == (-1, 18)
+    reply = session.handle(message('save', 3))
+    assert reply['finished']
+    assert all(output.stopped for output in machine.outputs)
+    assert cal.load() == ((-1, 18), True)
+
+
+def test_cancel_discards_preview():
+    import calibration as cal
+    session, _ = protocol()
+    session.handle(message('hello'))
+    session.handle(message('preview', 1, steps=[3, 4]))
+    session.handle(message('cancel', 2))
+    assert all(output.stopped for output in machine.outputs)
+    assert cal.load() == ((0, 0), False)
+
+
+def test_handshake_identity_replay_unknown_commands():
+    for request in (message('preview', steps=[0, 0]), [],
+                    dict(message('hello'), session='wrong'), message('drive')):
+        session, _ = protocol()
+        with raises(ValueError):
+            session.handle(request)
+    session, _ = protocol()
+    session.handle(message('hello'))
+    with raises(ValueError):
+        session.handle(message('heartbeat'))
+    with raises(ValueError):
+        session.handle(message('drive', 1))
+
+
+def test_deadlines():
+    from calibration_session import expired
+    assert not expired(59999, 0, 0, False)
+    assert expired(60000, 0, 0, False)
+    assert not expired(1999, 0, 0, True)
+    assert expired(2000, 0, 0, True)
+    assert expired(600000, 0, 599999, True)
+
+
+def test_network_cleanup_on_cancel_disconnect_malformed_and_timeout():
+    import network
+    import socket
+    hello = (json.dumps(message('hello')) + '\n').encode()
+    cancel = (json.dumps(message('cancel', 1)) + '\n').encode()
+    cases = (([hello, cancel], False, None), ([hello, b''], False, OSError),
+             ([b'{bad\n'], False, ValueError), ([b'x' * 1025], False, ValueError),
+             ([hello], False, OSError), ([], True, OSError))
+    for messages, no_client, error in cases:
+        clock = fresh()
+        import calibration_session
+        network.WLAN.active_interfaces = {}
+        socket.messages = list(messages)
+        socket.no_client, socket.closed, socket.replies = no_client, False, b''
+        if error is None:
+            calibration_session.run(ticket())
+            assert b'"finished": true' in socket.replies
+        else:
+            with raises(error):
+                calibration_session.run(ticket())
+        released()
+        assert socket.closed
+        assert network.WLAN.active_interfaces == {network.WLAN.IF_STA: False, network.WLAN.IF_AP: False}
+        if no_client:
+            assert clock.now >= 65000

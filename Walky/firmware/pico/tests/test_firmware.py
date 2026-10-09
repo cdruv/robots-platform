@@ -1,231 +1,164 @@
-import importlib
-import importlib.util
-from pathlib import Path
+import os
 import sys
-import types
-import unittest
-from unittest.mock import mock_open, patch
-
-FIRMWARE = Path(__file__).resolve().parents[1] / "src"
+import machine
+from support import write, read, raises, replace, released, ticket, FilesystemFault
 
 
-class FirmwareTests(unittest.TestCase):
-    def setUp(self):
-        self.pulses = []
-        self.outputs = []
-        self.pins = {}
-        self.clock = 0
-        self.resets = 0
-        self.interrupt = False
-        self.cause = 1
-        self.body_runs = 0
-        owner = self
-
-        class Pin:
-            OUT = 1
-            def __init__(self, number, mode=None, value=None):
-                self.number = number
-                if value is not None:
-                    owner.pins[number] = value
-            def toggle(self):
-                pass
-            def on(self):
-                owner.pins[self.number] = 1
-            def off(self):
-                owner.pins[self.number] = 0
-
-        class PWM:
-            def __init__(self, pin, freq, duty_u16):
-                assert freq == 50 and duty_u16 == 0
-                self.number = pin.number
-                self.stopped = False
-                owner.outputs.append(self)
-            def duty_ns(self, value):
-                owner.pulses.append((self.number, value))
-                if owner.interrupt:
-                    raise KeyboardInterrupt
-            def deinit(self):
-                self.stopped = True
-
-        class WDT:
-            def __init__(self, timeout):
-                assert timeout == 2000
-            def feed(self):
-                pass
-
-        def sleep_ms(ms):
-            owner.clock += ms
-        def reset():
-            owner.resets += 1
-            owner.cause = 3
-
-        machine = types.SimpleNamespace(Pin=Pin, PWM=PWM, WDT=WDT, reset=reset,
-                                        reset_cause=lambda: owner.cause, PWRON_RESET=1)
-        sys.path.insert(0, str(FIRMWARE))
-        try:
-            with patch.dict(sys.modules, machine=machine):
-                for name in ('modes', 'servo_check', 'body', 'calibration', 'servo_output', 'calibration_session'):
-                    sys.modules.pop(name, None)
-                self.modes = importlib.import_module('modes')
-                self.check = sys.modules['servo_check']
-                self.body = sys.modules['body']
-                self.calibration = sys.modules['calibration']
-                self.output = sys.modules['servo_output']
-        finally:
-            sys.path.remove(str(FIRMWARE))
-        self.addCleanup(patch.stopall)
-        patch.object(self.calibration, 'load', return_value=((0, 0), False)).start()
-        patch.object(self.calibration, 'consume_request', return_value=None).start()
-        self.check.time = types.SimpleNamespace(
-            ticks_ms=lambda: owner.clock, ticks_add=lambda a, b: a + b,
-            ticks_diff=lambda a, b: a - b, sleep_ms=sleep_ms)
-
-        def body_main():
-            owner.body_runs += 1
-        self.body.main = body_main
-
-    def boot(self, mode):
-        """One boot with mode.txt holding mode; returns the os.remove mock."""
-        with patch('builtins.open', mock_open(read_data=mode)), patch.object(
-                self.modes.os, 'remove') as remove:
-            self.modes.run()
-        return remove
-
-    def assert_released(self):
-        self.assertTrue(all(p.stopped for p in self.outputs))
-        self.assertEqual((self.pins[0], self.pins[1]), (0, 0))
-        self.assertEqual(self.resets, 1)
-
-    def test_import_touches_no_hardware(self):
-        self.assertEqual((self.outputs, self.pins, self.resets), ([], {}, 0))
-
-    def test_no_file_is_idle(self):
-        with patch('builtins.open', side_effect=OSError(2, 'missing')):
-            self.modes.run()
-        self.assertEqual((self.outputs, self.resets, self.body_runs), ([], 0, 0))
-        self.assertEqual((self.pins[0], self.pins[1]), (0, 0))
-
-    def test_modes_lists_exactly_the_accepted_requests(self):
-        self.assertEqual(self.modes.MODES,
-                         ('body', 'center', 'sweep', 'once:center', 'once:sweep'))
-        self.assertEqual(self.modes.MODE_FILE, 'mode.txt')
-        for mode in self.modes.MODES:
-            with self.subTest(mode=mode), patch('builtins.open', mock_open(read_data=mode)), \
-                    patch.object(self.modes.os, 'remove'):
-                self.assertEqual(self.modes.consume(), mode.split(':')[-1])
-
-    def test_once_center_is_finite_neutral_and_consumed(self):
-        self.boot('once:center').assert_called_once_with('mode.txt')
-        self.assertEqual(self.pulses, [(0, 1500000), (1, 1500000)])
-        self.assertLessEqual(self.clock, 10500)
-        self.assert_released()
-
-    def test_once_sweep_limits_order_and_return_to_center(self):
-        self.boot('once:sweep').assert_called_once_with('mode.txt')
-        self.assertTrue(all(1400000 <= v <= 1600000 for _, v in self.pulses))
-        movement = [(p, v) for p, v in self.pulses if v != 1500000]
-        self.assertEqual(movement[0][0], 1)
-        self.assertEqual(movement[-1][0], 0)
-        for pin in (0, 1):
-            self.assertEqual([v for p, v in self.pulses if p == pin][-1], 1500000)
-        self.assertLessEqual(self.clock, 12000)
-        self.assert_released()
-
-    def test_plain_mode_runs_again_only_after_power_cycle(self):
-        for mode in ('center', 'sweep'):
-            with self.subTest(mode=mode):
-                self.setUp()
-                self.boot(mode).assert_not_called()
-                first_count = len(self.pulses)
-                self.assertGreater(first_count, 0)
-                self.boot(mode)  # Automatic reset after completion.
-                self.assertEqual(len(self.pulses), first_count)
-                self.cause = 1  # User switches power off then on.
-                self.boot(mode).assert_not_called()
-                self.assertEqual(len(self.pulses), 2 * first_count)
-
-    def test_body_starts_on_every_power_on_but_not_after_a_reset(self):
-        self.boot('body').assert_not_called()
-        self.assertEqual((self.body_runs, self.outputs), (1, []))
-        self.cause = 3  # Watchdog or machine.reset().
-        self.boot('body')
-        self.assertEqual(self.body_runs, 1)
-        self.cause = 1
-        self.boot('body')
-        self.assertEqual(self.body_runs, 2)
-
-    def test_plain_mode_skips_watchdog_boot(self):
-        self.cause = 3
-        self.boot('center')
-        self.assertEqual(self.outputs, [])
-
-    def test_interruption_releases_both(self):
-        self.interrupt = True
-        with self.assertRaises(KeyboardInterrupt):
-            self.boot('once:sweep')
-        self.assert_released()
-
-    def test_bad_mode_and_failed_consumption_never_move(self):
-        for mode in ('walk', 'once:walk', 'once:body', 'test', 'repeat:center'):
-            with self.subTest(mode=mode):
-                with patch('builtins.open', mock_open(read_data=mode)), patch.object(
-                        self.modes.os, 'remove') as remove:
-                    with self.assertRaises(ValueError):
-                        self.modes.run()
-                    remove.assert_called_once_with('mode.txt')
-        with patch('builtins.open', mock_open(read_data='once:sweep')), patch.object(
-                self.modes.os, 'remove', side_effect=OSError('read only')):
-            with self.assertRaises(OSError):
-                self.modes.run()
-        self.assertEqual((self.outputs, self.body_runs), ([], 0))
-
-    def test_trimmed_center_and_sweep_stay_in_final_envelope(self):
-        self.calibration.load.return_value = ((-18, 1), True)
-        self.boot('once:sweep')
-        self.assertTrue(all(1400000 <= v <= 1600000 for _, v in self.pulses))
-        self.assertEqual([v for p, v in self.pulses if p == 0][-1], 1401000)
-        self.assertEqual([v for p, v in self.pulses if p == 1][-1], 1506000)
-        self.assert_released()
-
-    def test_calibration_overrides_without_consuming_normal_mode(self):
-        request = {'session': 'test'}
-        self.calibration.consume_request.return_value = request
-        calls = []
-        fake = types.SimpleNamespace(run=lambda value: calls.append(value))
-        with patch.dict(sys.modules, calibration_session=fake), patch.object(self.modes, 'consume') as consume:
-            self.modes.run()
-        consume.assert_not_called()
-        self.assertEqual(calls, [request])
-        self.assertEqual(self.pulses, [])
-
-    def test_watchdog_boot_preserves_all_requests(self):
-        self.cause = 3
-        with patch.object(self.modes, 'consume') as consume:
-            self.modes.run()
-        consume.assert_not_called()
-        self.calibration.consume_request.assert_not_called()
-        self.assertEqual(self.pulses, [])
-
-    def test_corrupt_calibration_prevents_pwm(self):
-        self.calibration.load.side_effect = ValueError('invalid storage')
-        with self.assertRaises(ValueError):
-            self.boot('once:center')
-        self.assertEqual(self.pulses, [])
-        self.assert_released()
-
-    def test_main_py_only_runs_modes(self):
-        calls = []
-        fake = types.SimpleNamespace(run=lambda: calls.append('run'))
-        spec = importlib.util.spec_from_file_location('launcher', FIRMWARE / 'main.py')
-        with patch.dict(sys.modules, modes=fake):
-            spec.loader.exec_module(importlib.util.module_from_spec(spec))
-        self.assertEqual(calls, ['run'])
-
-    def test_pulse_outside_bounds_rejected(self):
-        for value in (1399, 1601):
-            with self.assertRaises(ValueError):
-                self.output.pulse_us(value, 0)
+def boot(mode):
+    import modes
+    write('mode.txt', mode)
+    modes.run()
 
 
-if __name__ == '__main__':
-    unittest.main()
+def test_import_touches_no_hardware():
+    import modes
+    assert (machine.outputs, machine.pins, machine.resets) == ([], {}, 0)
+
+
+def test_no_file_is_idle():
+    import modes
+    modes.run()
+    assert (machine.outputs, machine.resets) == ([], 0)
+    assert (machine.pins[0], machine.pins[1]) == (0, 0)
+
+
+def test_modes_lists_exactly_the_accepted_requests():
+    import modes
+    assert modes.MODES == ('body', 'center', 'sweep', 'once:center', 'once:sweep')
+    for mode in modes.MODES:
+        write('mode.txt', mode)
+        assert modes.consume() == mode.split(':')[-1]
+        assert ('mode.txt' in os.listdir()) == (not mode.startswith('once:'))
+
+
+def test_once_center_is_finite_neutral_and_consumed():
+    import servo_check
+    boot('once:center')
+    assert 'mode.txt' not in os.listdir()
+    assert machine.pulses == [(0, 1500000), (1, 1500000)]
+    assert servo_check.time.now <= 10500
+    released()
+
+
+def test_once_sweep_limits_order_and_return_to_center():
+    import servo_check
+    boot('once:sweep')
+    assert 'mode.txt' not in os.listdir()
+    assert all(1400000 <= value <= 1600000 for _, value in machine.pulses)
+    movement = [(pin, value) for pin, value in machine.pulses if value != 1500000]
+    assert movement[0][0] == 1 and movement[-1][0] == 0
+    for pin in (0, 1):
+        assert [v for p, v in machine.pulses if p == pin][-1] == 1500000
+    assert servo_check.time.now <= 12000
+    released()
+
+
+def test_plain_mode_runs_again_only_after_power_cycle():
+    import modes
+    for mode in ('center', 'sweep'):
+        machine.clear()
+        boot(mode)
+        assert read('mode.txt') == mode
+        first_count = len(machine.pulses)
+        assert first_count > 0
+        modes.run()
+        assert len(machine.pulses) == first_count
+        machine.cause = machine.PWRON_RESET
+        modes.run()
+        assert len(machine.pulses) == 2 * first_count
+
+
+def test_body_starts_on_power_on_but_not_after_reset():
+    import body
+    import modes
+    calls = []
+    with replace(body, 'main', lambda: calls.append(True)):
+        boot('body')
+        machine.cause = 3
+        modes.run()
+        assert len(calls) == 1
+        machine.cause = machine.PWRON_RESET
+        modes.run()
+        assert len(calls) == 2
+    assert not machine.outputs
+
+
+def test_plain_mode_skips_watchdog_boot():
+    machine.cause = 3
+    boot('center')
+    assert not machine.outputs
+
+
+def test_interruption_releases_both():
+    machine.interrupt = True
+    with raises(KeyboardInterrupt):
+        boot('once:sweep')
+    released()
+
+
+def test_bad_mode_and_failed_consumption_never_move():
+    for mode in ('walk', 'once:walk', 'once:body', 'test', 'repeat:center'):
+        with raises(ValueError):
+            boot(mode)
+        assert 'mode.txt' not in os.listdir()
+    import modes
+    with replace(modes, 'os', FilesystemFault('remove')):
+        with raises(OSError):
+            boot('once:sweep')
+    assert not machine.outputs
+
+
+def test_trimmed_center_and_sweep_stay_in_final_envelope():
+    import calibration
+    calibration.save((-18, 1))
+    boot('once:sweep')
+    assert all(1400000 <= value <= 1600000 for _, value in machine.pulses)
+    assert [v for p, v in machine.pulses if p == 0][-1] == 1401000
+    assert [v for p, v in machine.pulses if p == 1][-1] == 1506000
+    released()
+
+
+def test_calibration_overrides_without_consuming_normal_mode():
+    import calibration
+    import calibration_session
+    calibration.arm(ticket())
+    calls = []
+    with replace(calibration_session, 'run', lambda request: calls.append(request)):
+        boot('once:sweep')
+    assert calls == [ticket()]
+    assert read('mode.txt') == 'once:sweep'
+    assert calibration.REQUEST_FILE not in os.listdir()
+    assert not machine.outputs
+
+
+def test_watchdog_boot_preserves_all_requests():
+    import calibration
+    calibration.arm(ticket())
+    machine.cause = 3
+    boot('once:sweep')
+    assert read('mode.txt') == 'once:sweep'
+    assert calibration.REQUEST_FILE in os.listdir()
+    assert not machine.outputs
+
+
+def test_corrupt_calibration_prevents_pwm():
+    write('calibration.json', '{')
+    with raises(ValueError):
+        boot('once:center')
+    assert not machine.outputs
+    released()
+
+
+def test_main_py_only_runs_modes():
+    import modes
+    calls = []
+    with replace(modes, 'run', lambda: calls.append(True)):
+        __import__('main')
+    assert calls == [True]
+
+
+def test_pulse_outside_bounds_rejected():
+    import servo_output
+    for pulse in (1399, 1601):
+        with raises(ValueError):
+            servo_output.pulse_us(pulse, 0)
