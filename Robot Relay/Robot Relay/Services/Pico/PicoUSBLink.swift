@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The Pico 2 W over USB: found by `PicoUSBMonitor` and read with `mpremote exec`, the same
 /// commands the firmware README uses. Never runs `mpremote reset`: with the carrier off, a
@@ -26,6 +27,7 @@ final class PicoUSBLink {
     func reserveForCalibration() async -> String? {
         guard !calibrationReserved else { return nil }
         calibrationReserved = true
+        Logger.pico.info("USB queue reserved for calibration")
         observers.forEach { $0(current) }
         generation += 1
         await tail?.value
@@ -34,6 +36,7 @@ final class PicoUSBLink {
 
     func releaseCalibration() {
         calibrationReserved = false
+        Logger.pico.info("USB queue released")
         observers.forEach { $0(current) }
         // Do not interrupt a still-powered board; next USB attachment refreshes it.
     }
@@ -80,6 +83,11 @@ final class PicoUSBLink {
 
     private func portChanged(_ port: String?) {
         generation += 1
+        if let port {
+            Logger.pico.notice("Pico appeared on \(port, privacy: .public)")
+        } else if current.port != nil {
+            Logger.pico.notice("Pico disappeared")
+        }
         if port != nil || current.port != nil {
             runner.report?(LinkActivity(text: "$ mpremote connect list", state: .ok(port ?? "Pico unplugged")))
         }
@@ -94,8 +102,13 @@ final class PicoUSBLink {
         enqueue { [weak self] in
             guard let self, !self.calibrationReserved else { return }
             let generation = generation
-            guard await !read(using: runner), attempt < Self.retryDelays.count else { return }
+            guard await !read(using: runner) else { return }
+            guard attempt < Self.retryDelays.count else {
+                Logger.pico.error("gave up reading the board after \(attempt + 1, privacy: .public) attempts")
+                return
+            }
             let delay = Self.retryDelays[attempt]
+            Logger.pico.info("read failed, retry \(attempt + 1, privacy: .public) of \(Self.retryDelays.count, privacy: .public) in 3 s")
             Task { [weak self] in
                 try? await Task.sleep(for: delay)
                 guard let self, generation == self.generation, current.arm == nil else { return }
@@ -115,7 +128,10 @@ final class PicoUSBLink {
         await reporter.run("mpremote", ["connect", port, "exec", PicoMode.readScript]) { result in
             output = result.stdout
             let arm = PicoMode.parse(result.stdout)
-            guard result.succeeded else { return .failed(result.failureReason) }
+            guard result.succeeded else {
+                Logger.pico.error("board read failed: \(result.failureReason, privacy: .public)")
+                return .failed(result.failureReason)
+            }
             return arm.map { .ok($0.label) } ?? .failed("no mode= line in the output")
         }
         guard generation == self.generation else { return false }
@@ -162,8 +178,13 @@ nonisolated enum PicoMode {
         + "print('modes=' + (','.join(__import__('\(module)').MODES) if '\(module).py' in f else ''))"
 
     static func parseCalibration(_ output: String) -> CalibrationSnapshot? {
-        guard let raw = value(of: "calibration", in: output), let data = raw.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(CalibrationSnapshot.self, from: data)
+        guard let raw = value(of: "calibration", in: output), raw != "null", let data = raw.data(using: .utf8) else { return nil }
+        do {
+            return try JSONDecoder().decode(CalibrationSnapshot.self, from: data)
+        } catch {
+            Logger.pico.error("calibration snapshot present but undecodable: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     /// Deletes the file if it exists.

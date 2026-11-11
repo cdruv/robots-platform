@@ -1,6 +1,7 @@
 import Foundation
 import IOKit
 import IOKit.serial
+import os
 
 /// Watches IOKit for serial ports on Raspberry Pi USB devices and reports the one to use.
 /// A Pico in BOOTSEL mode has no serial port, so it counts as not connected.
@@ -15,7 +16,10 @@ final class PicoUSBMonitor {
     /// Starts watching and reports the current port if there is one. Callbacks run on the main queue.
     func start() {
         precondition(!RobotServices.isTestHost, "unit tests must not watch USB")
-        guard notificationPort == nil, let notificationPort = IONotificationPortCreate(kIOMainPortDefault) else { return }
+        guard notificationPort == nil, let notificationPort = IONotificationPortCreate(kIOMainPortDefault) else {
+            if notificationPort == nil { Logger.pico.error("IONotificationPortCreate failed") }
+            return
+        }
         IONotificationPortSetDispatchQueue(notificationPort, .main)
         self.notificationPort = notificationPort
         let context = Unmanaged.passUnretained(self).toOpaque()
@@ -25,7 +29,10 @@ final class PicoUSBMonitor {
             let result = IOServiceAddMatchingNotification(
                 notificationPort, type, IOServiceMatching(kIOSerialBSDServiceValue), Self.callback, context, &iterator
             )
-            guard result == KERN_SUCCESS else { continue }
+            guard result == KERN_SUCCESS else {
+                Logger.pico.error("IOServiceAddMatchingNotification failed: kern return \(result, privacy: .public)")
+                continue
+            }
             Self.drain(iterator)  // Arms the notification.
             iterators.append(iterator)
         }

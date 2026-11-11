@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The phone row for real: TCP to onboard-android, optionally through `adb forward`.
 /// The Pico over USB via mpremote (`PicoUSBLink`). The controller stays offline until its
@@ -29,6 +30,7 @@ final class PhoneLinkService: RobotLinkService {
 
     func connectPhone(address: String) async {
         guard let address = PhoneAddress(address) else {
+            Logger.phone.info("invalid phone address: \(address, privacy: .public)")
             record(LinkActivity(text: address, state: .failed("expected host:port")))
             return
         }
@@ -55,10 +57,16 @@ final class PhoneLinkService: RobotLinkService {
             serials = Adb.onlineSerials(fromDevicesOutput: result.stdout)
             return Adb.judgeSelection(serials)
         }
-        guard devices.succeeded, serials.count == 1, let serial = serials.first else { return }
+        guard devices.succeeded, serials.count == 1, let serial = serials.first else {
+            Logger.phone.error("adb devices: \(devices.succeeded ? "\(serials.count) online devices" : devices.failureReason, privacy: .public)")
+            return
+        }
 
         let forward = await runner.run("adb", ["-s", serial, "forward", "tcp:\(port)", "tcp:\(port)"])
-        guard forward.succeeded else { return }
+        guard forward.succeeded else {
+            Logger.phone.error("adb forward failed: \(forward.failureReason, privacy: .public)")
+            return
+        }
         connection.connect(to: PhoneAddress(host: "127.0.0.1", port: port))
     }
 

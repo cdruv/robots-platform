@@ -1,6 +1,7 @@
 import CoreWLAN
 import CoreLocation
 import Foundation
+import os
 import Security
 
 nonisolated protocol CalibrationWiFi: Sendable {
@@ -29,13 +30,16 @@ actor MacCalibrationWiFi: CalibrationWiFi {
         UserDefaults.standard.set(temporary, forKey: "calibrationTemporarySSID")
         for attempt in 0..<12 {
             try Task.checkCancellation()
+            Logger.calibration.info("Wi-Fi join attempt \(attempt + 1, privacy: .public) of 12")
             let networks = try interface.scanForNetworks(withName: ticket.ssid)
             if let network = networks.first(where: { $0.ssid == ticket.ssid }) {
                 try interface.associate(to: network, password: ticket.password)
+                Logger.calibration.info("joined calibration Wi-Fi")
                 return
             }
             if attempt < 11 { try await Task.sleep(for: .seconds(2)) }
         }
+        Logger.calibration.error("calibration Wi-Fi network not found after 12 attempts")
         throw CalibrationFailure("Robot Wi-Fi not found. Check battery power and the one-time calibration boot; re-arm over USB if it timed out.")
     }
 
@@ -82,6 +86,7 @@ actor MacCalibrationWiFi: CalibrationWiFi {
             guard interface.ssid() == previous else { throw CalibrationFailure("Network restoration not confirmed") }
             return nil
         } catch {
+            Logger.calibration.error("Wi-Fi restore failed: \(error.localizedDescription, privacy: .public)")
             return "Could not restore \(previous). Select your network in Wi-Fi Settings. \(error.localizedDescription)"
         }
     }
@@ -144,8 +149,15 @@ struct CalibrationKeychain: CalibrationTicketStorage {
         item[kSecValueData as String] = try JSONEncoder().encode(ticket)
         let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: item[kSecValueData as String]!] as CFDictionary)
         if status == errSecItemNotFound {
-            guard SecItemAdd(item as CFDictionary, nil) == errSecSuccess else { throw CalibrationFailure("Could not store calibration credentials in Keychain") }
-        } else if status != errSecSuccess { throw CalibrationFailure("Could not update calibration credentials in Keychain") }
+            let added = SecItemAdd(item as CFDictionary, nil)
+            guard added == errSecSuccess else {
+                Logger.calibration.error("Keychain add failed: OSStatus \(added, privacy: .public)")
+                throw CalibrationFailure("Could not store calibration credentials in Keychain")
+            }
+        } else if status != errSecSuccess {
+            Logger.calibration.error("Keychain update failed: OSStatus \(status, privacy: .public)")
+            throw CalibrationFailure("Could not update calibration credentials in Keychain")
+        }
     }
     func load() -> CalibrationTicket? {
         precondition(!RobotServices.isTestHost)
@@ -153,7 +165,12 @@ struct CalibrationKeychain: CalibrationTicketStorage {
         request[kSecReturnData as String] = true
         var value: CFTypeRef?
         guard SecItemCopyMatching(request as CFDictionary, &value) == errSecSuccess, let data = value as? Data else { return nil }
-        return try? JSONDecoder().decode(CalibrationTicket.self, from: data)
+        do {
+            return try JSONDecoder().decode(CalibrationTicket.self, from: data)
+        } catch {
+            Logger.calibration.error("stored calibration ticket undecodable")
+            return nil
+        }
     }
     func clear() {
         precondition(!RobotServices.isTestHost)

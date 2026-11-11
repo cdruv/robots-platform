@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 @Observable
 final class CalibrationController {
@@ -44,6 +45,7 @@ final class CalibrationController {
             }
         }
         if let pending = storage.load() {
+            Logger.calibration.info("pending calibration ticket recovered from the Keychain")
             ticket = pending
             phase = .awaitingBoot
             message = "Recovered a prepared calibration. Disconnect USB before connecting, or cancel with the original board on USB."
@@ -76,6 +78,7 @@ final class CalibrationController {
                     set(.awaitingBoot, "Disconnect USB. Place Walky on its back, legs clear, and turn battery power on. After the five-second countdown, connect within 60 seconds.")
                 }
             } catch {
+                Logger.calibration.error("prepare failed: \(error.localizedDescription, privacy: .public)")
                 // Arming may have succeeded despite a lost USB reply. Attempt to disarm.
                 let removed = armingAttempted ? await board.cancelPrepared(ticket) : true
                 await finish(error: error.localizedDescription + (removed ? "" : " The one-time request may remain armed; reconnect the original board over USB before powering it."))
@@ -120,6 +123,7 @@ final class CalibrationController {
                                 throw CalibrationFailure("Save acknowledgement did not match")
                             }
                         } catch {
+                            Logger.calibration.error("save unconfirmed: \(error.localizedDescription, privacy: .public)")
                             await finish(error: "Save unconfirmed. Reconnect the Pico over USB with battery off to inspect stored offsets.")
                             return
                         }
@@ -134,6 +138,11 @@ final class CalibrationController {
                     try? await Task.sleep(for: .milliseconds(250))
                 }
             } catch {
+                if wantsCancel || Task.isCancelled {
+                    Logger.calibration.error("connect cancelled by user: \(error.localizedDescription, privacy: .public)")
+                } else {
+                    Logger.calibration.error("connect/adjust failed: \(error.localizedDescription, privacy: .public)")
+                }
                 let reason = wantsCancel ? nil : error.localizedDescription
                 await finish(error: handshakeReceived ? reason :
                     (reason ?? "Connection cancelled.") + " If the Pico has not booted yet, its one-time calibration request remains armed. Reconnect over USB with battery off to prepare and cancel it.")
@@ -195,6 +204,7 @@ final class CalibrationController {
     private func set(_ phase: Phase, _ message: String) {
         self.phase = phase
         self.message = message
+        Logger.calibration.notice("phase: \(phase.rawValue, privacy: .public)")
         log?(message)
     }
 }

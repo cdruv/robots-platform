@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import os
 
 @Observable
 final class TelemetryStore {
@@ -125,7 +126,10 @@ final class TelemetryStore {
     /// Adds one event from the stream. Internal so tests can feed events without a service.
     func ingest(_ event: TelemetryEvent) {
         // seq restarts with every phone session; ids must stay unique.
-        if let last = events.last?.seq, event.seq <= last { reset() }
+        if let last = events.last?.seq, event.seq <= last {
+            Logger.telemetry.info("session reset: seq \(event.seq, privacy: .public) after \(last, privacy: .public)")
+            reset()
+        }
         if originMonoNs == nil { originMonoNs = event.tsMonoNs }
         events.append(event)
         if passesFilter(event) { visibleEvents.append(event) }

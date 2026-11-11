@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 nonisolated struct CommandResult: Sendable {
     var status: Int32
@@ -41,11 +42,18 @@ final class CommandRunner {
     ) async -> CommandResult {
         precondition(!RobotServices.isTestHost, "unit tests must not run \(tool)")
         let text = "$ " + Self.displayCommand(tool, arguments)
+        Logger.command.debug("run \(Self.displayCommand(tool, arguments), privacy: .public)")
         report?(LinkActivity(text: text, state: .running))
         let result: CommandResult
+        let started = ContinuousClock.now
         if let url = Self.resolve(tool, environment: environment) {
             result = await Self.execute(url, arguments, timeout: timeout)
+            if !result.succeeded {
+                let seconds = (ContinuousClock.now - started).components.seconds
+                Logger.command.error("\(Self.displayCommand(tool, arguments), privacy: .public) failed: status \(result.status, privacy: .public) after \(seconds, privacy: .public) s, stderr: \(result.stderr)")
+            }
         } else {
+            Logger.command.error("\(tool, privacy: .public) not found in the search directories")
             result = CommandResult(status: 127, stdout: "", stderr: "\(tool) not found (looked in \(Self.searchDirectories(environment: environment).joined(separator: ", ")))")
         }
         report?(LinkActivity(text: text, state: judge(result)))
@@ -129,6 +137,7 @@ final class CommandRunner {
             var stderr = (try? String(contentsOf: errURL, encoding: .utf8)) ?? ""
             if process.terminationReason == .uncaughtSignal {
                 stderr = "timed out after \(Int(seconds)) s\n" + stderr
+                Logger.command.error("\(url.lastPathComponent, privacy: .public) timed out after \(Int(seconds), privacy: .public) s")
             }
             return CommandResult(
                 status: process.terminationStatus,
@@ -136,6 +145,7 @@ final class CommandRunner {
                 stderr: stderr
             )
         } catch {
+            Logger.command.error("\(url.lastPathComponent, privacy: .public) failed to launch: \(error.localizedDescription, privacy: .public)")
             return CommandResult(status: -1, stdout: "", stderr: error.localizedDescription)
         }
     }

@@ -1,6 +1,7 @@
 import SwiftUI
 import UniformTypeIdentifiers
 import AppKit
+import os
 
 /// Firmware files, power-on mode and leg offsets on the left; the commands run on the right.
 struct FirmwareView: View {
@@ -147,7 +148,10 @@ struct FirmwareFilesCard: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder]) { result in
-            if case .success(let folder) = result { store.chooseFolder(folder) }
+            switch result {
+            case .success(let folder): store.chooseFolder(folder)
+            case .failure(let error): Logger.firmware.error("folder picker failed: \(error.localizedDescription, privacy: .public)")
+            }
         }
         .fileDialogDefaultDirectory(URL(fileURLWithPath: state.folder))
     }

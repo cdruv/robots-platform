@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 protocol CalibrationBoard: AnyObject {
     var isUSBConnected: Bool { get }
@@ -51,7 +52,12 @@ final class PicoCalibrationBoard: CalibrationBoard {
         guard let port = pico.current.port, let encoded = try? JSONEncoder().encode(ticket).base64EncodedString() else { return false }
         let script = "import calibration, os, json, binascii\nt = json.loads(binascii.a2b_base64('" + encoded + "'))\nassert calibration.board_id() == t['board']\np = calibration.REQUEST_FILE\nif p in os.listdir():\n r = json.load(open(p))\n assert r['session'] == t['session']\n os.remove(p)\n os.sync()\nprint('calibration-disarmed')\n"
         guard let result = try? await runScript(script, port: port, secrets: [encoded, ticket.password, ticket.session]) else { return false }
-        return result.succeeded && result.stdout.contains("calibration-disarmed")
+        let disarmed = result.succeeded && result.stdout.contains("calibration-disarmed")
+        if !disarmed {
+            let output = CalibrationCommandDiagnostics.failure(result, secrets: [encoded, ticket.password, ticket.session])
+            Logger.calibration.error("cancelPrepared failed: status \(result.status, privacy: .public), output: \(output)")
+        }
+        return disarmed
     }
 
     private func runScript(_ script: String, port: String, secrets: [String]) async throws -> CommandResult {

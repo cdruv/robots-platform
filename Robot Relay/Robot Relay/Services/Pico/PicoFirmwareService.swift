@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import os
 
 /// Firmware over USB: compares the local firmware folder with the board's files, uploads the
 /// changed ones and sets the power-on mode, all with mpremote through `PicoUSBLink`'s queue.
@@ -57,7 +58,10 @@ final class PicoFirmwareService: FirmwareService {
     }
 
     func setFolder(_ folder: URL?) async {
-        guard !pico.calibrationReserved, !isBusy else { return }
+        guard !pico.calibrationReserved, !isBusy else {
+            Logger.firmware.debug("folder change skipped: board busy or reserved")
+            return
+        }
         let folder = folder?.standardizedFileURL ?? Self.defaultFolder
         if folder == Self.defaultFolder.standardizedFileURL {
             defaults.removeObject(forKey: folderKey)
@@ -65,30 +69,39 @@ final class PicoFirmwareService: FirmwareService {
             defaults.set(folder.path, forKey: folderKey)
         }
         self.folder = folder
+        Logger.firmware.info("firmware folder set to \(folder.lastPathComponent, privacy: .public)")
         await refreshLocal()
     }
 
     func upload() async {
         await refreshLocal()
         let names = current.changedFiles.map(\.name)
-        guard !pico.calibrationReserved, !isBusy, !names.isEmpty else { return }
+        guard !pico.calibrationReserved, !isBusy, !names.isEmpty else {
+            if !names.isEmpty { Logger.firmware.debug("upload skipped: board busy or reserved") }
+            return
+        }
         let paths = names.map { folder.appendingPathComponent($0).path }
         await busy {
             await pico.withBoard(reportingTo: runner) { [runner] port in
-                await runner.run("mpremote", ["connect", port, "fs", "cp"] + paths + [":"], timeout: .seconds(60)) { result in
+                let result = await runner.run("mpremote", ["connect", port, "fs", "cp"] + paths + [":"], timeout: .seconds(60)) { result in
                     result.succeeded ? .ok("copied \(names.joined(separator: ", "))") : .failed(result.failureReason)
                 }
+                Logger.firmware.notice("upload finished: \(names.count, privacy: .public) files, \(result.succeeded ? "ok" : "failed", privacy: .public)")
             }
         }
     }
 
     func setBootMode(_ mode: String?) async {
         if let mode, !link.modes.contains(mode) { return }
-        guard !pico.calibrationReserved, !isBusy else { return }
+        guard !pico.calibrationReserved, !isBusy else {
+            Logger.firmware.debug("mode change skipped: board busy or reserved")
+            return
+        }
         let script = mode.map(PicoMode.armScript) ?? PicoMode.disarmScript
         await busy {
             await pico.withBoard(reportingTo: runner) { [runner] port in
-                await runner.run("mpremote", ["connect", port, "exec", script])
+                let result = await runner.run("mpremote", ["connect", port, "exec", script])
+                Logger.firmware.notice("power-on mode set to \(mode ?? "none", privacy: .public): \(result.succeeded ? "ok" : "failed", privacy: .public)")
             }
         }
     }
@@ -133,9 +146,16 @@ final class PicoFirmwareService: FirmwareService {
 
     /// The folder's top-level `.py` files, sorted; nil when the folder doesn't exist.
     nonisolated static func localFiles(in folder: URL) -> [PicoFile]? {
-        guard let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { return nil }
+        let names: [String]
+        do {
+            names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
+        } catch {
+            Logger.firmware.error("firmware folder unreadable: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
         return names.filter { $0.hasSuffix(".py") }.sorted().compactMap { name in
             guard let data = FileManager.default.contents(atPath: folder.appendingPathComponent(name).path) else {
+                Logger.firmware.error("firmware file unreadable: \(name, privacy: .public)")
                 return nil
             }
             let sha = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()

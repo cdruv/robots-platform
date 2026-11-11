@@ -7,11 +7,18 @@
 
 import SwiftUI
 import AppKit
+import os
 
 @main
 struct Robot_RelayApp: App {
     @NSApplicationDelegateAdaptor(RelayAppDelegate.self) private var delegate
-    @State private var app = AppModel(services: RobotServices.isTestHost ? .placeholder() : .live())
+    @State private var app = Robot_RelayApp.makeModel()
+
+    private static func makeModel() -> AppModel {
+        let placeholder = RobotServices.isTestHost
+        Logger.app.notice("launch \(AppVersion.display, privacy: .public), \(placeholder ? "placeholder" : "live", privacy: .public) services")
+        return AppModel(services: placeholder ? .placeholder() : .live())
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -31,8 +38,10 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
     var cleanup: (() async -> Void)?
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !RobotServices.isTestHost, let cleanup else { return .terminateNow }
+        Logger.app.info("quit deferred while calibration shuts down")
         Task {
             await cleanup()
+            Logger.app.info("shutdown complete, quitting")
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

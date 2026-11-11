@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import os
 
 protocol CalibrationTransport: AnyObject {
     func connect() async throws
@@ -22,6 +23,7 @@ final class CalibrationTCPTransport: CalibrationTransport {
         let timeout = Task { [weak self] in
             try? await Task.sleep(for: .seconds(8))
             guard !Task.isCancelled else { return }
+            Logger.calibration.error("transport connect timed out after 8 s")
             self?.completeConnect(.failure(CalibrationFailure("Calibration connection timed out. Check Local Network permission in System Settings and re-arm calibration if the Pico timed out.")))
             connection.cancel()
         }
