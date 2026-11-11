@@ -45,7 +45,7 @@ struct ConnectionPopover: View {
             }
         }
         .padding(16)
-        .frame(width: 470)
+        .frame(width: 705)
         .foregroundStyle(Nocturne.text)
         .presentationBackground(Nocturne.surface)
         .preferredColorScheme(.dark)
