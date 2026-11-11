@@ -28,7 +28,7 @@ struct Robot_RelayApp: App {
                 .preferredColorScheme(.dark)
         }
         .windowStyle(.hiddenTitleBar)
-        .defaultSize(width: 1000, height: 620)
+        .defaultSize(width: 1500, height: 930)
         .windowResizability(.contentMinSize)
     }
 }
