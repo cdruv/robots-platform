@@ -331,6 +331,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connects to the robot phone and temporary Pico calibration network.";
 				INFOPLIST_KEY_NSLocationUsageDescription = "Reads Wi-Fi network names to connect calibration and restore your network.";
@@ -365,6 +366,7 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connects to the robot phone and temporary Pico calibration network.";
 				INFOPLIST_KEY_NSLocationUsageDescription = "Reads Wi-Fi network names to connect calibration and restore your network.";
