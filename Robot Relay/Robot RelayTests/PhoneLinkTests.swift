@@ -106,50 +106,19 @@ struct SeqDedupeTests {
 }
 
 struct AdbTests {
-    @Test func picksOnlyOnlineDevices() {
-        let output = """
-        List of devices attached
-        3A111FDJH000AB\tdevice
-        emulator-5554\toffline
-        R58M\tunauthorized
-
-        """
-        let serials = Adb.onlineSerials(fromDevicesOutput: output)
-        #expect(serials == ["3A111FDJH000AB"])
-        #expect(Adb.judgeSelection(serials) == .ok("3A111FDJH000AB"))
-    }
-
-    @Test func noneOrSeveralIsAFailureNamingThem() {
-        #expect(Adb.onlineSerials(fromDevicesOutput: "List of devices attached\n\n").isEmpty)
-        #expect(Adb.judgeSelection([]) == .failed("no online device · is USB debugging authorized?"))
-        let several = Adb.onlineSerials(fromDevicesOutput: "List of devices attached\nA\tdevice\nB\tdevice\n")
-        #expect(Adb.judgeSelection(several) == .failed("several devices: A, B"))
+    @Test func explainsUSBSetupFailures() {
+        for (error, hint) in [("error: device unauthorized", "allow USB debugging"),
+                              ("error: no devices found", "Check the cable"),
+                              ("error: more than one device", "Connect only the Walky phone")] {
+            let result = CommandResult(status: 1, stdout: "", stderr: error)
+            #expect(Adb.failureMessage(result).contains(hint))
+        }
     }
 
     @Test func commandsDisplayAsTyped() {
         #expect(CommandRunner.displayCommand("adb", ["-s", "3A1", "forward", "tcp:7777", "tcp:7777"])
             == "adb -s 3A1 forward tcp:7777 tcp:7777")
         #expect(CommandRunner.displayCommand("mpremote", ["fs", "cp", "a b.py", ":"]) == "mpremote fs cp 'a b.py' :")
-    }
-}
-
-struct PhoneAddressTests {
-    @Test func parsesHostAndPort() {
-        #expect(PhoneAddress("10.0.0.42:7777") == PhoneAddress(host: "10.0.0.42", port: 7777))
-        #expect(PhoneAddress(" pixel.local ")?.port == 7777)
-        #expect(PhoneAddress("localhost:9000")?.isLoopback == true)
-        #expect(PhoneAddress("") == nil)
-        #expect(PhoneAddress("host:") == nil)
-        #expect(PhoneAddress("host:0") == nil)
-        #expect(PhoneAddress("host:70000") == nil)
-        #expect(PhoneAddress("a:b:c") == nil)
-        #expect(PhoneAddress("has space:1") == nil)
-    }
-
-    @Test func transportFollowsTheAddress() {
-        #expect(PhoneLink(address: "127.0.0.1:7777").transport == "USB · adb")
-        #expect(PhoneLink(address: "10.0.0.42:7777").transport == "Wi‑Fi")
-        #expect(PhoneLink().transport == "—")
     }
 }
 

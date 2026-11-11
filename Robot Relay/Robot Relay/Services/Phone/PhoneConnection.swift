@@ -11,7 +11,6 @@ import os
 final class PhoneConnection {
     struct Status: Equatable {
         var state: PhoneLink.State = .disconnected
-        var address: PhoneAddress?
         var hello: PhoneHello?
         var rttMs: Int?
         var eventsPerSecond = 0
@@ -19,6 +18,7 @@ final class PhoneConnection {
         var dropped = 0
     }
 
+    static let port: UInt16 = 7777
     static let pingInterval: Duration = .seconds(2)
     static let backoff: [Duration] = [.seconds(3)]
     static let maxAttempts = 4
@@ -50,7 +50,9 @@ final class PhoneConnection {
     private var eventsThisSecond = 0
 
     /// The footer's text for the current connection, as `nc` would be typed.
-    private var connectText = ""
+    private let connectText = "nc 127.0.0.1 \(PhoneConnection.port)"
+    private var prepareUSB: (() async -> Bool)?
+    private var setupTask: Task<Void, Never>?
 
     init() {
         (events, eventSink) = AsyncStream.makeStream(of: TelemetryEvent.self, bufferingPolicy: .bufferingNewest(5000))
@@ -59,25 +61,36 @@ final class PhoneConnection {
     /// Every event received, without duplicates. Single consumer.
     func telemetry() -> AsyncStream<TelemetryEvent> { events }
 
-    func connect(to address: PhoneAddress) {
-        disconnect(reporting: false)
+    func connect(prepareUSB: @escaping () async -> Bool) {
+        guard !wantsConnection else { return }
+        self.prepareUSB = prepareUSB
         wantsConnection = true
         failures = 0
-        status.address = address
-        connectText = "nc \(address.host) \(address.port)"
-        Logger.phone.info("connecting to \(address.host, privacy: .public):\(address.port, privacy: .public)")
-        open()
+        startAttempt()
+    }
+
+    private func startAttempt() {
+        status.state = .connecting
+        status.hello = nil
+        report("Connecting to Walky over USB", .ok("attempt \(failures + 1) of \(Self.maxAttempts)"))
+        setupTask = Task {
+            guard !Task.isCancelled, let prepareUSB else { return }
+            let ready = await prepareUSB()
+            guard !Task.isCancelled else { return }
+            if ready {
+                open()
+            } else {
+                lost("USB setup failed", stage: "USB connection")
+            }
+        }
     }
 
     func disconnect() {
-        disconnect(reporting: true)
-    }
-
-    // MARK: Connection lifecycle
-
-    private func disconnect(reporting: Bool) {
         let wasActive = wantsConnection
         wantsConnection = false
+        setupTask?.cancel()
+        setupTask = nil
+        prepareUSB = nil
         retryTask?.cancel()
         retryTask = nil
         tickTask?.cancel()
@@ -86,18 +99,18 @@ final class PhoneConnection {
         status.state = .disconnected
         status.rttMs = nil
         status.eventsPerSecond = 0
-        if reporting && wasActive {
+        if wasActive {
             Logger.phone.notice("connection closed by user")
-            report(connectText, .ok("closed"))
+            report("USB connection", .ok("disconnected by user"))
         }
     }
 
     private func open() {
         precondition(!RobotServices.isTestHost, "unit tests must not open a phone connection")
-        guard let address = status.address, let port = NWEndpoint.Port(rawValue: address.port) else { return }
+        let port = NWEndpoint.Port(rawValue: Self.port)!
         generation += 1
         let current = generation
-        let connection = NWConnection(host: NWEndpoint.Host(address.host), port: port, using: .tcp)
+        let connection = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
         self.connection = connection
         framer = LineFramer()
         sawHello = false
@@ -118,9 +131,8 @@ final class PhoneConnection {
     private func handle(_ state: NWConnection.State) {
         switch state {
         case .ready:
-            status.state = .connected
             Logger.phone.notice("connected")
-            report(connectText, .ok("connected"))
+            report(connectText, .ok("USB tunnel open · waiting for Walky"))
             receive()
             startTicking()
         case .waiting(let error), .failed(let error):
@@ -142,7 +154,7 @@ final class PhoneConnection {
                 if let error {
                     self.lost(Self.describe(error))
                 } else if isComplete {
-                    self.lost("closed")
+                    self.lost(self.sawHello || self.sawEvent ? "USB telemetry closed" : "No telemetry received. Open Walky on the unlocked phone.")
                 } else {
                     self.receive()
                 }
@@ -151,7 +163,7 @@ final class PhoneConnection {
     }
 
     /// The connection ended without the user asking: schedule a reconnect, or give up.
-    private func lost(_ reason: String) {
+    private func lost(_ reason: String, stage: String? = nil) {
         closeConnection()
         tickTask?.cancel()
         tickTask = nil
@@ -164,17 +176,17 @@ final class PhoneConnection {
             Logger.phone.error("gave up after \(Self.maxAttempts, privacy: .public) attempts")
             wantsConnection = false
             status.state = .disconnected
-            report(connectText, .failed("\(reason) · gave up after \(Self.maxAttempts) attempts"))
+            report(stage ?? connectText, .failed("\(reason) · gave up after \(Self.maxAttempts) attempts"))
             return
         }
         Logger.phone.notice("retry in \(delay.components.seconds, privacy: .public) s")
         status.state = .retrying(Date.now.addingTimeInterval(Double(delay.components.seconds)))
-        report(connectText, .failed("\(reason) · retry in \(delay.components.seconds) s"))
+        report(stage ?? connectText, .failed("\(reason) · retry in \(delay.components.seconds) s"))
         retryTask?.cancel()
         retryTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self, self.wantsConnection else { return }
-            self.open()
+            self.startAttempt()
         }
     }
 
@@ -197,6 +209,7 @@ final class PhoneConnection {
     func handle(line: Data) {
         switch PhoneLine.decode(line) {
         case .hello(let hello):
+            status.state = .connected
             sawHello = true
             failures = 0
             if dedupe.begin(session: hello.session) {
@@ -206,12 +219,13 @@ final class PhoneConnection {
                 Logger.phone.info("hello received, same session")
             }
             status.hello = hello
-            report("← hello \(hello.summary)", .ok(nil))
+            report("Walky connected · hello \(hello.summary)", .ok(nil))
         case .pong(let ping):
             guard let sent = pingsInFlight.removeValue(forKey: ping) else { return }
             let elapsed = ContinuousClock.now - sent
             status.rttMs = Int((Double(elapsed.components.attoseconds) / 1e15 + Double(elapsed.components.seconds) * 1000).rounded())
         case .event(let event):
+            status.state = .connected
             if !sawEvent {
                 sawEvent = true
                 // A server without hello lines: a new connection may be a new session.

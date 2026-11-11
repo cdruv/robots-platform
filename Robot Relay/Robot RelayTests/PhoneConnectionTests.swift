@@ -30,7 +30,7 @@ struct PhoneConnectionTests {
         for _ in 0..<4 { if let event = await events.next() { seqs.append(event.seq) } }
         #expect(seqs == [1, 2, 3, 4])
         #expect(connection.status.hello?.session == "abcd1234")
-        #expect(activity == ["← hello Pixel · session abcd", "← hello Pixel · session abcd"])
+        #expect(activity == ["Walky connected · hello Pixel · session abcd", "Walky connected · hello Pixel · session abcd"])
     }
 
     @Test func droppedCountAddsUpAndResetsWithANewSession() {

@@ -1,9 +1,9 @@
 import Foundation
 
-/// Pretends the phone is reachable over Wi‑Fi. Disconnecting it falls back to
+/// Pretends the phone is reachable over USB. Disconnecting it falls back to
 /// "Pico over USB", the state the Firmware design shows.
 final class PlaceholderRobotLinkService: RobotLinkService {
-    private var current = PlaceholderRobotLinkService.connected(address: "10.0.0.42:7777")
+    private var current = PlaceholderRobotLinkService.connected()
     private let stream: AsyncStream<RobotLinks>
     private let continuation: AsyncStream<RobotLinks>.Continuation
 
@@ -14,9 +14,9 @@ final class PlaceholderRobotLinkService: RobotLinkService {
 
     func links() -> AsyncStream<RobotLinks> { stream }
 
-    func connectPhone(address: String) async {
+    func connectPhone() async {
         let controller = current.controller
-        current = Self.connected(address: address)
+        current = Self.connected()
         current.controller = controller
         publish()
     }
@@ -36,11 +36,6 @@ final class PlaceholderRobotLinkService: RobotLinkService {
         publish()
     }
 
-    func adbForward(address: String) async {
-        current.phone.address = address
-        publish()
-    }
-
     func clearActivity() async {
         current.activity.removeAll()
         publish()
@@ -52,9 +47,9 @@ final class PlaceholderRobotLinkService: RobotLinkService {
 
     private static let modes = ["body", "center", "sweep", "once:center", "once:sweep"]
 
-    private static func connected(address: String) -> RobotLinks {
+    private static func connected() -> RobotLinks {
         RobotLinks(
-            phone: PhoneLink(state: .connected, deviceName: "Pixel 8", address: address, rttMs: 38, eventsPerSecond: 18, dropped: 0),
+            phone: PhoneLink(state: .connected, deviceName: "Pixel 8", rttMs: 38, eventsPerSecond: 18, dropped: 0),
             pico: PicoLink(
                 route: .viaPhone,
                 arm: .armed("body"),

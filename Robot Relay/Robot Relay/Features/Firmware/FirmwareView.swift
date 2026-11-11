@@ -107,12 +107,12 @@ struct FirmwareFilesCard: View {
                 Text((state.folder as NSString).abbreviatingWithTildeInPath)
                     .font(.nocturneMono(11))
                     .foregroundStyle(state.hasLocalFolder ? Nocturne.neutral500 : Nocturne.accent300)
-                    .lineLimit(1)
-                    .truncationMode(.head)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .help(state.folder)
-                Spacer(minLength: 0)
                 Button("Change source folder…") { isChoosingFolder = true }
                     .buttonStyle(.nocturneSecondary)
+                    .fixedSize()
             }
             .disabled(state.isBusy)
             if !state.hasLocalFolder {

@@ -4,28 +4,14 @@ import Observation
 @Observable
 final class ConnectionStore {
     private(set) var links = RobotLinks()
-    /// The address field. Remembered across launches.
-    var addressDraft: String {
-        didSet {
-            defaults.set(addressDraft, forKey: Self.addressKey)
-            isAddressInvalid = false
-        }
-    }
-    /// Set when Connect was pressed with something that isn't `host:port`.
-    private(set) var isAddressInvalid = false
-
-    private static let addressKey = "phoneAddress"
     private let service: any RobotLinkService
-    private let defaults: UserDefaults
     private var task: Task<Void, Never>?
 
-    init(service: any RobotLinkService, defaults: UserDefaults = .standard) {
+    init(service: any RobotLinkService) {
         self.service = service
-        self.defaults = defaults
-        addressDraft = defaults.string(forKey: Self.addressKey) ?? PhoneAddress.defaultForward.description
     }
 
-    /// Follows the links and connects to the remembered phone address.
+    /// Follows the links and connects to the USB phone.
     func start() {
         guard task == nil else { return }
         task = Task { [weak self, service] in
@@ -33,9 +19,7 @@ final class ConnectionStore {
                 self?.links = links
             }
         }
-        if let address = PhoneAddress(addressDraft) {
-            Task { await service.connectPhone(address: address.description) }
-        }
+        Task { await service.connectPhone() }
     }
 
     /// What the Connection chip shows.
@@ -50,7 +34,7 @@ final class ConnectionStore {
         case .connected:
             return Summary(tone: .on, label: "Connected", detail: links.phone.rttMs.map { "\($0) ms" } ?? "— ms")
         case .connecting:
-            return Summary(tone: .idle, label: "Connecting", detail: links.phone.address)
+            return Summary(tone: .idle, label: "Connecting", detail: "phone over USB")
         case .retrying(let date):
             return Summary(tone: .idle, label: "Retrying", detail: "retry \(Self.secondsUntil(date))s")
         case .disconnected:
@@ -73,11 +57,7 @@ final class ConnectionStore {
             Task { await service.disconnectPhone() }
             return
         }
-        guard let address = PhoneAddress(addressDraft) else {
-            isAddressInvalid = true
-            return
-        }
-        Task { await service.connectPhone(address: address.description) }
+        Task { await service.connectPhone() }
     }
 
     func refreshPico() {
@@ -86,10 +66,6 @@ final class ConnectionStore {
 
     func pairController() {
         Task { await service.pairController() }
-    }
-
-    func adbForward() {
-        Task { await service.adbForward(address: addressDraft) }
     }
 
     func clearActivity() {

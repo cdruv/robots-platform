@@ -1,7 +1,7 @@
 import Foundation
 import os
 
-/// The phone row for real: TCP to onboard-android, optionally through `adb forward`.
+/// Connects to onboard-android through a USB ADB forward.
 /// The Pico over USB via mpremote (`PicoUSBLink`). The controller stays offline until its
 /// transport exists.
 final class PhoneLinkService: RobotLinkService {
@@ -28,13 +28,14 @@ final class PhoneLinkService: RobotLinkService {
 
     func links() -> AsyncStream<RobotLinks> { stream }
 
-    func connectPhone(address: String) async {
-        guard let address = PhoneAddress(address) else {
-            Logger.phone.info("invalid phone address: \(address, privacy: .public)")
-            record(LinkActivity(text: address, state: .failed("expected host:port")))
-            return
+    func connectPhone() async {
+        connection.connect { [runner] in
+            let port = "tcp:\(PhoneConnection.port)"
+            let result = await runner.run("adb", ["-d", "forward", port, port]) { result in
+                result.succeeded ? .ok("USB port forward ready") : .failed(Adb.failureMessage(result))
+            }
+            return result.succeeded
         }
-        connection.connect(to: address)
     }
 
     func disconnectPhone() async {
@@ -47,29 +48,6 @@ final class PhoneLinkService: RobotLinkService {
 
     func pairController() async {}
 
-    /// Runs `adb devices`, picks the one online phone, forwards its port to
-    /// localhost, then connects to `127.0.0.1:port`.
-    func adbForward(address: String) async {
-        let port = PhoneAddress(address)?.port ?? PhoneAddress.defaultPort
-        var serials: [String] = []
-        let devices = await runner.run("adb", ["devices"]) { result in
-            guard result.succeeded else { return .failed(result.failureReason) }
-            serials = Adb.onlineSerials(fromDevicesOutput: result.stdout)
-            return Adb.judgeSelection(serials)
-        }
-        guard devices.succeeded, serials.count == 1, let serial = serials.first else {
-            Logger.phone.error("adb devices: \(devices.succeeded ? "\(serials.count) online devices" : devices.failureReason, privacy: .public)")
-            return
-        }
-
-        let forward = await runner.run("adb", ["-s", serial, "forward", "tcp:\(port)", "tcp:\(port)"])
-        guard forward.succeeded else {
-            Logger.phone.error("adb forward failed: \(forward.failureReason, privacy: .public)")
-            return
-        }
-        connection.connect(to: PhoneAddress(host: "127.0.0.1", port: port))
-    }
-
     func clearActivity() async {
         current.activity.removeAll()
         continuation.yield(current)
@@ -78,7 +56,6 @@ final class PhoneLinkService: RobotLinkService {
     private func apply(_ status: PhoneConnection.Status) {
         var phone = current.phone
         phone.state = status.state
-        if let address = status.address { phone.address = address.description }
         phone.deviceName = status.hello?.device ?? "—"
         phone.rttMs = status.rttMs
         phone.eventsPerSecond = status.eventsPerSecond
@@ -100,23 +77,17 @@ final class PhoneLinkService: RobotLinkService {
     }
 }
 
-/// Parsing for `adb` output, shared with tests.
 nonisolated enum Adb {
-    /// Serials in the `device` state from `adb devices` (skips offline/unauthorized ones).
-    static func onlineSerials(fromDevicesOutput output: String) -> [String] {
-        output.split(whereSeparator: \.isNewline).dropFirst().compactMap { line in
-            let fields = line.split(whereSeparator: \.isWhitespace)
-            guard fields.count >= 2, fields[1] == "device" else { return nil }
-            return String(fields[0])
+    static func failureMessage(_ result: CommandResult) -> String {
+        let reason = result.stderr.split(whereSeparator: \.isNewline)
+            .first(where: { $0.contains("error:") }).map(String.init) ?? result.failureReason
+        if result.status == 127 { return "ADB missing. Install Android SDK Platform-Tools." }
+        if reason.contains("unauthorized") { return "Unlock the phone and allow USB debugging." }
+        if reason.contains("more than one") { return "Multiple USB devices found. Connect only the Walky phone." }
+        if reason.contains("no device") {
+            return "No USB phone found. Check the cable and enable USB debugging."
         }
-    }
-
-    /// The footer state for `adb devices`: ok naming the one device, else why none was picked.
-    static func judgeSelection(_ serials: [String]) -> LinkActivity.State {
-        switch serials.count {
-        case 1: .ok(serials[0])
-        case 0: .failed("no online device · is USB debugging authorized?")
-        default: .failed("several devices: \(serials.joined(separator: ", "))")
-        }
+        if reason.contains("offline") { return "USB phone offline. Reconnect it and unlock the screen." }
+        return reason
     }
 }

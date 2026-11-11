@@ -16,6 +16,7 @@ import java.io.IOException
 import java.io.OutputStreamWriter
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
@@ -34,7 +35,7 @@ data class TcpServerStatus(
 
 /**
  * Serves telemetry as JSON lines to any TCP client, e.g. `adb forward tcp:7777 tcp:7777`
- * then `nc localhost 7777` on the workstation, or `nc <phone-ip> 7777` over Wi-Fi.
+ * then `nc localhost 7777` on the workstation. The listener binds only to loopback.
  * New clients first receive the last [replayEvents] events. Each client has a bounded
  * line queue; a client that cannot keep up loses lines, which are counted as drops.
  *
@@ -66,7 +67,7 @@ class TcpServerSink(
     fun start() {
         if (server != null || closed) return
         try {
-            val socket = ServerSocket(port)
+            val socket = ServerSocket(port, 0, InetAddress.getByName("127.0.0.1"))
             server = socket
             thread(name = "walky-telemetry-accept", isDaemon = true) { acceptLoop(socket) }
             publish()

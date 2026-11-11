@@ -5,7 +5,7 @@ struct ConnectionPopover: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        @Bindable var connection = app.connection
+        let connection = app.connection
         let links = connection.links
         VStack(alignment: .leading, spacing: 14) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -22,27 +22,10 @@ struct ConnectionPopover: View {
                 picoRow(links.pico)
                 FadedRule()
                 controllerRow(links.controller)
+                FadedRule()
             }
 
-            HStack(spacing: 8) {
-                TextField("host:port", text: $connection.addressDraft)
-                    .textFieldStyle(.plain)
-                    .font(.nocturneMono(12))
-                    .padding(.horizontal, 10)
-                    .frame(minHeight: 30)
-                    .background(Nocturne.surface, in: RoundedRectangle(cornerRadius: Nocturne.Radius.md))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: Nocturne.Radius.md)
-                            .strokeBorder(connection.isAddressInvalid ? Nocturne.accent300 : Nocturne.divider, lineWidth: 1)
-                    )
-                    .onSubmit { connection.togglePhone() }
-                Button("adb forward") { connection.adbForward() }
-                    .buttonStyle(.nocturneSecondary)
-            }
-
-            if !links.activity.isEmpty {
-                ActivityFooter(entries: links.activity) { connection.clearActivity() }
-            }
+            ActivityFooter(entries: links.activity) { connection.clearActivity() }
         }
         .padding(16)
         .frame(width: 705)
@@ -56,29 +39,25 @@ struct ConnectionPopover: View {
         return LinkRow(
             name: "Phone app",
             tone: phone.isConnected ? .on : isIdle ? .off : .idle,
-            meta: "\(phone.deviceName) · \(phone.transport)"
+            meta: "\(phone.deviceName) · USB"
         ) {
             switch phone.state {
             case .connected:
                 let rtt = phone.rttMs.map { "\($0) ms" } ?? "—"
-                Text("\(Text(phone.address).foregroundStyle(Nocturne.neutral200)) · RTT \(rtt)\n\(phone.eventsPerSecond) ev/s · \(phone.dropped) dropped")
+                Text("RTT \(rtt)\n\(phone.eventsPerSecond) ev/s · \(phone.dropped) dropped")
             case .connecting:
-                Text("\(Self.dash(phone.address))\nConnecting…")
+                Text("Connecting over USB…")
             case .retrying(let date):
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
-                    Text("\(Self.dash(phone.address))\nRetrying in \(ConnectionStore.secondsUntil(date)) s")
+                    Text("Retrying in \(ConnectionStore.secondsUntil(date)) s")
                 }
             case .disconnected:
-                Text("\(Self.dash(phone.address))\nNot connected")
+                Text("Not connected")
             }
         } action: {
             Button(isIdle ? "Connect" : "Disconnect") { app.connection.togglePhone() }
                 .buttonStyle(isIdle ? .nocturneSecondary : .nocturneGhost)
         }
-    }
-
-    private static func dash(_ text: String) -> String {
-        text.isEmpty ? "—" : text
     }
 
     /// Status only: the USB port, MicroPython release and power-on mode, as read on connect or Refresh.
@@ -95,7 +74,8 @@ struct ConnectionPopover: View {
         return LinkRow(
             name: "Pico 2 W",
             tone: pico.route == .viaPhone ? .warning : isUSB ? .idle : .off,
-            meta: meta
+            meta: meta,
+            showsDetailBelow: isUSB || pico.route == .viaPhone
         ) {
             switch pico.route {
             case nil:
@@ -119,11 +99,12 @@ struct ConnectionPopover: View {
             Button {
                 app.connection.refreshPico()
             } label: {
-                Image(systemName: "arrow.clockwise")
+                Label("Refresh Pico status", systemImage: "arrow.clockwise")
+                    .labelStyle(.titleAndIcon)
             }
             .buttonStyle(.nocturneGhost)
             .disabled(!isUSB)
-            .help("Read the board again")
+            .help("Read the Pico’s board information over USB, including its MicroPython version and power-on mode")
             Button("Firmware") {
                 app.selection = .firmware
                 app.isConnectionPopoverPresented = false
@@ -161,8 +142,7 @@ private struct ActivityFooter: View {
                 LazyVStack(alignment: .leading, spacing: 3) {
                     ForEach(entries) { entry in
                         line(entry)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                            .fixedSize(horizontal: false, vertical: true)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
@@ -171,7 +151,12 @@ private struct ActivityFooter: View {
             .defaultScrollAnchor(.bottom)
             .defaultScrollAnchor(.bottom, for: .sizeChanges)
             .scrollBounceBehavior(.basedOnSize)
-            .frame(height: 104)
+            .frame(height: 234)
+            .overlay(alignment: .topLeading) {
+                if entries.isEmpty {
+                    Text("No logs")
+                }
+            }
 
             Button(action: clear) {
                 Image(systemName: "trash")
@@ -180,7 +165,7 @@ private struct ActivityFooter: View {
             .help("Clear activity")
         }
         .font(.nocturneMono(10.5))
-        .foregroundStyle(Nocturne.neutral600)
+        .foregroundStyle(Nocturne.neutral400)
     }
 
     private func line(_ entry: LinkActivity) -> Text {
@@ -205,25 +190,38 @@ private struct LinkRow<Detail: View, Action: View>: View {
     let name: String
     let tone: StatusDot.Tone
     let meta: String
+    var showsDetailBelow = false
     @ViewBuilder var detail: Detail
     @ViewBuilder var action: Action
 
     var body: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 8) {
-                    StatusDot(tone: tone)
-                    Text(name)
-                        .font(.nocturne(13, .medium))
-                        .foregroundStyle(tone == .off ? Nocturne.neutral500 : Nocturne.text)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        StatusDot(tone: tone)
+                        Text(name)
+                            .font(.nocturne(13, .medium))
+                            .foregroundStyle(tone == .off ? Nocturne.neutral500 : Nocturne.text)
+                    }
+                    Text(meta)
                 }
-                Text(meta)
+                .frame(width: 104, alignment: .leading)
+                if showsDetailBelow {
+                    Spacer()
+                } else {
+                    detail
+                        .lineSpacing(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                action
             }
-            .frame(width: 104, alignment: .leading)
-            detail
-                .lineSpacing(3)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            action
+            if showsDetailBelow {
+                detail
+                    .lineSpacing(3)
+                    .lineLimit(nil)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .font(.nocturneMono(11.5))
         .foregroundStyle(Nocturne.neutral500)
