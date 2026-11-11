@@ -100,7 +100,7 @@ final class PhoneConnection {
         status.rttMs = nil
         status.eventsPerSecond = 0
         if wasActive {
-            Logger.phone.notice("connection closed by user")
+            Logger.phone.notice("phone: disconnected by user")
             report("USB connection", .ok("disconnected by user"))
         }
     }
@@ -131,7 +131,7 @@ final class PhoneConnection {
     private func handle(_ state: NWConnection.State) {
         switch state {
         case .ready:
-            Logger.phone.notice("connected")
+            Logger.phone.notice("phone: USB tunnel open (adb forward tcp:\(Self.port, privacy: .public)), waiting for hello")
             report(connectText, .ok("USB tunnel open · waiting for Walky"))
             receive()
             startTicking()
@@ -171,15 +171,14 @@ final class PhoneConnection {
         status.eventsPerSecond = 0
         guard wantsConnection else { return }
         failures += 1
-        Logger.phone.notice("connection lost: \(reason, privacy: .public), attempt \(self.failures, privacy: .public) of \(Self.maxAttempts, privacy: .public)")
         guard let delay = Self.retryDelay(afterFailures: failures) else {
-            Logger.phone.error("gave up after \(Self.maxAttempts, privacy: .public) attempts")
+            Logger.phone.error("phone: attempt \(self.failures, privacy: .public) of \(Self.maxAttempts, privacy: .public) failed: \(reason, privacy: .public), giving up")
             wantsConnection = false
             status.state = .disconnected
             report(stage ?? connectText, .failed("\(reason) · gave up after \(Self.maxAttempts) attempts"))
             return
         }
-        Logger.phone.notice("retry in \(delay.components.seconds, privacy: .public) s")
+        Logger.phone.notice("phone: attempt \(self.failures, privacy: .public) of \(Self.maxAttempts, privacy: .public) failed: \(reason, privacy: .public), retrying in \(delay.components.seconds, privacy: .public) s")
         status.state = .retrying(Date.now.addingTimeInterval(Double(delay.components.seconds)))
         report(stage ?? connectText, .failed("\(reason) · retry in \(delay.components.seconds) s"))
         retryTask?.cancel()
@@ -214,9 +213,9 @@ final class PhoneConnection {
             failures = 0
             if dedupe.begin(session: hello.session) {
                 status.dropped = 0
-                Logger.phone.info("hello received, new session")
+                Logger.phone.info("phone: hello from \(hello.summary, privacy: .public), new session, telemetry restarts")
             } else {
-                Logger.phone.info("hello received, same session")
+                Logger.phone.info("phone: hello from \(hello.summary, privacy: .public), same session, skipping replayed events")
             }
             status.hello = hello
             report("Walky connected · hello \(hello.summary)", .ok(nil))
@@ -238,7 +237,7 @@ final class PhoneConnection {
         case .otherLink:
             break
         case nil:
-            Logger.phone.error("undecodable line dropped (\(line.count, privacy: .public) bytes): \(String(decoding: line.prefix(200), as: UTF8.self))")
+            Logger.phone.error("phone: dropped undecodable line (\(line.count, privacy: .public) bytes): \(String(decoding: line.prefix(200), as: UTF8.self))")
         }
     }
 
@@ -267,7 +266,7 @@ final class PhoneConnection {
         // Pongs queue behind telemetry; forget pings that never came back.
         if pingsInFlight.count > 16, let oldest = pingsInFlight.keys.min() { pingsInFlight[oldest] = nil }
         connection.send(content: Data("{\"ping\":\(ping)}\n".utf8), completion: .contentProcessed { error in
-            if let error { Logger.phone.error("ping send failed: \(error.localizedDescription, privacy: .public)") }
+            if let error { Logger.phone.error("phone: ping send failed: \(error.localizedDescription, privacy: .public)") }
         })
     }
 
@@ -349,7 +348,7 @@ nonisolated struct LineFramer: Sendable {
         buffer.removeSubrange(buffer.startIndex..<start)
         if buffer.count > maxLineBytes {
             let limit = maxLineBytes
-            Logger.phone.error("line over \(limit, privacy: .public) bytes discarded")
+            Logger.phone.error("phone: line over \(limit, privacy: .public) bytes, discarding until next newline")
             buffer.removeAll()
             discarding = true
         }

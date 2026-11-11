@@ -55,7 +55,7 @@ final class PicoCalibrationBoard: CalibrationBoard {
         let disarmed = result.succeeded && result.stdout.contains("calibration-disarmed")
         if !disarmed {
             let output = CalibrationCommandDiagnostics.failure(result, secrets: [encoded, ticket.password, ticket.session])
-            Logger.calibration.error("cancelPrepared failed: status \(result.status, privacy: .public), output: \(output)")
+            Logger.calibration.error("calibration disarm over USB failed: status \(result.status, privacy: .public), output: \(output)")
         }
         return disarmed
     }

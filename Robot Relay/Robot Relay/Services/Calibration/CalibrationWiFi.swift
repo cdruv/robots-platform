@@ -30,16 +30,16 @@ actor MacCalibrationWiFi: CalibrationWiFi {
         UserDefaults.standard.set(temporary, forKey: "calibrationTemporarySSID")
         for attempt in 0..<12 {
             try Task.checkCancellation()
-            Logger.calibration.info("Wi-Fi join attempt \(attempt + 1, privacy: .public) of 12")
+            Logger.calibration.debug("scanning for calibration Wi-Fi (\(attempt + 1, privacy: .public) of 12)")
             let networks = try interface.scanForNetworks(withName: ticket.ssid)
             if let network = networks.first(where: { $0.ssid == ticket.ssid }) {
                 try interface.associate(to: network, password: ticket.password)
-                Logger.calibration.info("joined calibration Wi-Fi")
+                Logger.calibration.info("joined calibration Wi-Fi, will restore \(self.previous.map { "\"\($0)\"" } ?? "no previous network", privacy: .public)")
                 return
             }
             if attempt < 11 { try await Task.sleep(for: .seconds(2)) }
         }
-        Logger.calibration.error("calibration Wi-Fi network not found after 12 attempts")
+        Logger.calibration.error("calibration Wi-Fi not found after 12 scans (~24 s)")
         throw CalibrationFailure("Robot Wi-Fi not found. Check battery power and the one-time calibration boot; re-arm over USB if it timed out.")
     }
 
@@ -84,9 +84,10 @@ actor MacCalibrationWiFi: CalibrationWiFi {
             }
             try interface.associate(to: network, password: password as String?)
             guard interface.ssid() == previous else { throw CalibrationFailure("Network restoration not confirmed") }
+            Logger.calibration.info("restored Mac Wi-Fi to \"\(previous, privacy: .public)\"")
             return nil
         } catch {
-            Logger.calibration.error("Wi-Fi restore failed: \(error.localizedDescription, privacy: .public)")
+            Logger.calibration.error("Wi-Fi restore to \"\(previous, privacy: .public)\" failed: \(error.localizedDescription, privacy: .public)")
             return "Could not restore \(previous). Select your network in Wi-Fi Settings. \(error.localizedDescription)"
         }
     }
@@ -168,7 +169,7 @@ struct CalibrationKeychain: CalibrationTicketStorage {
         do {
             return try JSONDecoder().decode(CalibrationTicket.self, from: data)
         } catch {
-            Logger.calibration.error("stored calibration ticket undecodable")
+            Logger.calibration.error("stored calibration ticket undecodable: \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }

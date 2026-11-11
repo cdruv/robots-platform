@@ -48,13 +48,16 @@ final class CommandRunner {
         let started = ContinuousClock.now
         if let url = Self.resolve(tool, environment: environment) {
             result = await Self.execute(url, arguments, timeout: timeout)
-            if !result.succeeded {
-                let seconds = (ContinuousClock.now - started).components.seconds
-                Logger.command.error("\(Self.displayCommand(tool, arguments), privacy: .public) failed: status \(result.status, privacy: .public) after \(seconds, privacy: .public) s, stderr: \(result.stderr)")
+            let seconds = (ContinuousClock.now - started) / .seconds(1)
+            if result.succeeded {
+                Logger.command.debug("\(Self.displayCommand(tool, arguments), privacy: .public): ok in \(seconds, format: .fixed(precision: 1), privacy: .public) s")
+            } else {
+                Logger.command.error("\(Self.displayCommand(tool, arguments), privacy: .public) failed: status \(result.status, privacy: .public) after \(seconds, format: .fixed(precision: 1), privacy: .public) s, stderr: \(result.stderr)")
             }
         } else {
-            Logger.command.error("\(tool, privacy: .public) not found in the search directories")
-            result = CommandResult(status: 127, stdout: "", stderr: "\(tool) not found (looked in \(Self.searchDirectories(environment: environment).joined(separator: ", ")))")
+            let searched = Self.searchDirectories(environment: environment).joined(separator: ", ")
+            Logger.command.error("\(tool, privacy: .public) not found (looked in \(searched, privacy: .public))")
+            result = CommandResult(status: 127, stdout: "", stderr: "\(tool) not found (looked in \(searched))")
         }
         report?(LinkActivity(text: text, state: judge(result)))
         return result

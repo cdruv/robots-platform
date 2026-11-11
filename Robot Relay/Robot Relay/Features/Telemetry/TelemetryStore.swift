@@ -127,7 +127,7 @@ final class TelemetryStore {
     func ingest(_ event: TelemetryEvent) {
         // seq restarts with every phone session; ids must stay unique.
         if let last = events.last?.seq, event.seq <= last {
-            Logger.telemetry.info("session reset: seq \(event.seq, privacy: .public) after \(last, privacy: .public)")
+            Logger.telemetry.info("telemetry cleared: phone seq restarted (\(event.seq, privacy: .public) after \(last, privacy: .public))")
             reset()
         }
         if originMonoNs == nil { originMonoNs = event.tsMonoNs }

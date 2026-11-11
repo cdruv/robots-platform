@@ -38,7 +38,7 @@ final class RelayAppDelegate: NSObject, NSApplicationDelegate {
     var cleanup: (() async -> Void)?
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !RobotServices.isTestHost, let cleanup else { return .terminateNow }
-        Logger.app.info("quit deferred while calibration shuts down")
+        Logger.app.info("quit requested, running calibration shutdown first")
         Task {
             await cleanup()
             Logger.app.info("shutdown complete, quitting")

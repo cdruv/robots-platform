@@ -27,7 +27,7 @@ final class PicoUSBLink {
     func reserveForCalibration() async -> String? {
         guard !calibrationReserved else { return nil }
         calibrationReserved = true
-        Logger.pico.info("USB queue reserved for calibration")
+        Logger.pico.info("Pico USB reserved for calibration, reads, uploads and mode changes paused")
         observers.forEach { $0(current) }
         generation += 1
         await tail?.value
@@ -36,7 +36,7 @@ final class PicoUSBLink {
 
     func releaseCalibration() {
         calibrationReserved = false
-        Logger.pico.info("USB queue released")
+        Logger.pico.info("Pico USB released, board is re-read on next plug")
         observers.forEach { $0(current) }
         // Do not interrupt a still-powered board; next USB attachment refreshes it.
     }
@@ -85,8 +85,8 @@ final class PicoUSBLink {
         generation += 1
         if let port {
             Logger.pico.notice("Pico appeared on \(port, privacy: .public)")
-        } else if current.port != nil {
-            Logger.pico.notice("Pico disappeared")
+        } else if let old = current.port {
+            Logger.pico.notice("Pico unplugged from \(old, privacy: .public)")
         }
         if port != nil || current.port != nil {
             runner.report?(LinkActivity(text: "$ mpremote connect list", state: .ok(port ?? "Pico unplugged")))
@@ -103,12 +103,13 @@ final class PicoUSBLink {
             guard let self, !self.calibrationReserved else { return }
             let generation = generation
             guard await !read(using: runner) else { return }
+            let port = current.port ?? "?"
             guard attempt < Self.retryDelays.count else {
-                Logger.pico.error("gave up reading the board after \(attempt + 1, privacy: .public) attempts")
+                Logger.pico.error("Pico \(port, privacy: .public): board read failed \(attempt + 1, privacy: .public) times, giving up until replug or Refresh")
                 return
             }
             let delay = Self.retryDelays[attempt]
-            Logger.pico.info("read failed, retry \(attempt + 1, privacy: .public) of \(Self.retryDelays.count, privacy: .public) in 3 s")
+            Logger.pico.info("Pico \(port, privacy: .public): board read failed, retry \(attempt + 1, privacy: .public) of \(Self.retryDelays.count, privacy: .public) in \(delay.components.seconds, privacy: .public) s")
             Task { [weak self] in
                 try? await Task.sleep(for: delay)
                 guard let self, generation == self.generation, current.arm == nil else { return }
@@ -129,10 +130,14 @@ final class PicoUSBLink {
             output = result.stdout
             let arm = PicoMode.parse(result.stdout)
             guard result.succeeded else {
-                Logger.pico.error("board read failed: \(result.failureReason, privacy: .public)")
+                Logger.pico.error("Pico \(port, privacy: .public): board read failed: \(result.failureReason, privacy: .public)")
                 return .failed(result.failureReason)
             }
-            return arm.map { .ok($0.label) } ?? .failed("no mode= line in the output")
+            guard let arm else {
+                Logger.pico.error("Pico \(port, privacy: .public): board read returned no mode= line")
+                return .failed("no mode= line in the output")
+            }
+            return .ok(arm.label)
         }
         guard generation == self.generation else { return false }
         var link = current

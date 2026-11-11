@@ -59,7 +59,7 @@ final class PicoFirmwareService: FirmwareService {
 
     func setFolder(_ folder: URL?) async {
         guard !pico.calibrationReserved, !isBusy else {
-            Logger.firmware.debug("folder change skipped: board busy or reserved")
+            Logger.firmware.notice("firmware folder change ignored: \(self.blockedReason, privacy: .public)")
             return
         }
         let folder = folder?.standardizedFileURL ?? Self.defaultFolder
@@ -69,7 +69,7 @@ final class PicoFirmwareService: FirmwareService {
             defaults.set(folder.path, forKey: folderKey)
         }
         self.folder = folder
-        Logger.firmware.info("firmware folder set to \(folder.lastPathComponent, privacy: .public)")
+        Logger.firmware.info("firmware folder set to \((folder.path as NSString).abbreviatingWithTildeInPath, privacy: .public)")
         await refreshLocal()
     }
 
@@ -77,7 +77,7 @@ final class PicoFirmwareService: FirmwareService {
         await refreshLocal()
         let names = current.changedFiles.map(\.name)
         guard !pico.calibrationReserved, !isBusy, !names.isEmpty else {
-            if !names.isEmpty { Logger.firmware.debug("upload skipped: board busy or reserved") }
+            if !names.isEmpty { Logger.firmware.notice("firmware upload ignored: \(self.blockedReason, privacy: .public)") }
             return
         }
         let paths = names.map { folder.appendingPathComponent($0).path }
@@ -86,7 +86,12 @@ final class PicoFirmwareService: FirmwareService {
                 let result = await runner.run("mpremote", ["connect", port, "fs", "cp"] + paths + [":"], timeout: .seconds(60)) { result in
                     result.succeeded ? .ok("copied \(names.joined(separator: ", "))") : .failed(result.failureReason)
                 }
-                Logger.firmware.notice("upload finished: \(names.count, privacy: .public) files, \(result.succeeded ? "ok" : "failed", privacy: .public)")
+                let summary = "firmware upload to \(port): \(names.joined(separator: ", "))"
+                if result.succeeded {
+                    Logger.firmware.notice("\(summary, privacy: .public): ok")
+                } else {
+                    Logger.firmware.error("\(summary, privacy: .public): failed")
+                }
             }
         }
     }
@@ -94,16 +99,25 @@ final class PicoFirmwareService: FirmwareService {
     func setBootMode(_ mode: String?) async {
         if let mode, !link.modes.contains(mode) { return }
         guard !pico.calibrationReserved, !isBusy else {
-            Logger.firmware.debug("mode change skipped: board busy or reserved")
+            Logger.firmware.notice("power-on mode change ignored: \(self.blockedReason, privacy: .public)")
             return
         }
         let script = mode.map(PicoMode.armScript) ?? PicoMode.disarmScript
         await busy {
             await pico.withBoard(reportingTo: runner) { [runner] port in
                 let result = await runner.run("mpremote", ["connect", port, "exec", script])
-                Logger.firmware.notice("power-on mode set to \(mode ?? "none", privacy: .public): \(result.succeeded ? "ok" : "failed", privacy: .public)")
+                let summary = mode.map { "power-on mode on \(port) set to \($0)" } ?? "power-on mode on \(port) cleared"
+                if result.succeeded {
+                    Logger.firmware.notice("\(summary, privacy: .public): ok")
+                } else {
+                    Logger.firmware.error("\(summary, privacy: .public): failed")
+                }
             }
         }
+    }
+
+    private var blockedReason: String {
+        pico.calibrationReserved ? "board reserved for calibration" : "another board operation is running"
     }
 
     private func busy(_ work: () async -> Void) async {
@@ -150,7 +164,7 @@ final class PicoFirmwareService: FirmwareService {
         do {
             names = try FileManager.default.contentsOfDirectory(atPath: folder.path)
         } catch {
-            Logger.firmware.error("firmware folder unreadable: \(error.localizedDescription, privacy: .public)")
+            Logger.firmware.error("firmware folder \((folder.path as NSString).abbreviatingWithTildeInPath, privacy: .public) unreadable: \(error.localizedDescription, privacy: .public)")
             return nil
         }
         return names.filter { $0.hasSuffix(".py") }.sorted().compactMap { name in

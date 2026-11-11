@@ -17,7 +17,7 @@ final class PicoUSBMonitor {
     func start() {
         precondition(!RobotServices.isTestHost, "unit tests must not watch USB")
         guard notificationPort == nil, let notificationPort = IONotificationPortCreate(kIOMainPortDefault) else {
-            if notificationPort == nil { Logger.pico.error("IONotificationPortCreate failed") }
+            if notificationPort == nil { Logger.pico.error("IONotificationPortCreate failed, Pico plug detection disabled") }
             return
         }
         IONotificationPortSetDispatchQueue(notificationPort, .main)
@@ -30,7 +30,7 @@ final class PicoUSBMonitor {
                 notificationPort, type, IOServiceMatching(kIOSerialBSDServiceValue), Self.callback, context, &iterator
             )
             guard result == KERN_SUCCESS else {
-                Logger.pico.error("IOServiceAddMatchingNotification failed: kern return \(result, privacy: .public)")
+                Logger.pico.error("IOServiceAddMatchingNotification failed: kern return \(result, privacy: .public), Pico plug detection disabled")
                 continue
             }
             Self.drain(iterator)  // Arms the notification.
