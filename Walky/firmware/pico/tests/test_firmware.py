@@ -24,7 +24,8 @@ def test_no_file_is_idle():
 
 def test_modes_lists_exactly_the_accepted_requests():
     import modes
-    assert modes.MODES == ('body', 'center', 'sweep', 'once:center', 'once:sweep')
+    actions = ('body', 'center', 'sweep', 'rotation-check', 'range-left', 'range-right')
+    assert modes.MODES == actions + tuple('once:' + action for action in actions)
     for mode in modes.MODES:
         write('mode.txt', mode)
         assert modes.consume() == mode.split(':')[-1]
@@ -36,7 +37,18 @@ def test_once_center_is_finite_neutral_and_consumed():
     boot('once:center')
     assert 'mode.txt' not in os.listdir()
     assert machine.pulses == [(0, 1500000), (1, 1500000)]
-    assert servo_check.time.now <= 10500
+    assert servo_check.time.now == 6000
+    released()
+
+
+def test_rotation_check_is_one_shot_and_powers_each_side_within_limits():
+    import calibration
+    import servo_check
+    calibration.save((-18, 18))
+    boot('once:rotation-check')
+    assert 'mode.txt' not in os.listdir()
+    assert machine.pulses == [(1, 1600000), (0, 1400000)]
+    assert servo_check.time.now == 10000
     released()
 
 
@@ -49,7 +61,7 @@ def test_once_sweep_limits_order_and_return_to_center():
     assert movement[0][0] == 1 and movement[-1][0] == 0
     for pin in (0, 1):
         assert [v for p, v in machine.pulses if p == pin][-1] == 1500000
-    assert servo_check.time.now <= 12000
+    assert servo_check.time.now <= 10000
     released()
 
 
@@ -97,7 +109,7 @@ def test_interruption_releases_both():
 
 
 def test_bad_mode_and_failed_consumption_never_move():
-    for mode in ('walk', 'once:walk', 'once:body', 'test', 'repeat:center'):
+    for mode in ('walk', 'once:walk', 'once:once:body', 'test', 'repeat:center'):
         with raises(ValueError):
             boot(mode)
         assert 'mode.txt' not in os.listdir()
@@ -162,3 +174,22 @@ def test_pulse_outside_bounds_rejected():
     for pulse in (1399, 1601):
         with raises(ValueError):
             servo_output.pulse_us(pulse, 0)
+
+def test_full_range_each_side_starts_at_trimmed_center_and_releases():
+    import calibration
+    import modes
+    calibration.save((-18, 18))
+    for side, mode, center in ((0, 'once:range-left', 1401), (1, 'once:range-right', 1599)):
+        machine.clear()
+        boot(mode)
+        assert 'mode.txt' not in os.listdir()
+        values = []
+        for pin, pulse in machine.pulses:
+            assert pin == side
+            values.append(pulse // 1000)
+        assert values[0] == values[-1] == center
+        assert (min(values), max(values)) == (500, 2500)
+        assert all(abs(values[i] - values[i-1]) <= 5 for i in range(1, len(values)))
+        released()
+        modes.run()
+        assert len(machine.pulses) == len(values)

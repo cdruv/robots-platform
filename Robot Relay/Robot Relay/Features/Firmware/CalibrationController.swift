@@ -75,7 +75,7 @@ final class CalibrationController {
                 if wantsCancel {
                     await cancelPending(ticket)
                 } else {
-                    set(.awaitingBoot, "Disconnect USB. Place Walky on its back, legs clear, and turn battery power on. After the five-second countdown, connect within 60 seconds.")
+                    set(.awaitingBoot, "Disconnect USB. Place Walky on its back, legs clear, and turn battery power on. After the three-second countdown, connect within 60 seconds.")
                 }
             } catch {
                 Logger.calibration.error("calibration prepare over USB failed (arming attempted: \(armingAttempted ? "yes, disarming" : "no", privacy: .public)): \(error.localizedDescription, privacy: .public)")

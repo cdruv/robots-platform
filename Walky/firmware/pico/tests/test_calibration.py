@@ -149,4 +149,4 @@ def test_network_cleanup_on_cancel_disconnect_malformed_and_timeout():
         assert socket.closed
         assert network.WLAN.active_interfaces == {network.WLAN.IF_STA: False, network.WLAN.IF_AP: False}
         if no_client:
-            assert clock.now >= 65000
+            assert clock.now == 63000

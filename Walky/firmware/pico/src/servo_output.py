@@ -17,16 +17,18 @@ def release(outputs=()):
             Pin(number, Pin.OUT, value=0)
 
 
-def pulse_us(nominal, step):
+def pulse_us(nominal, step, limits=(MIN_US, MAX_US)):
     if type(nominal) is not int:
         raise ValueError('Pulse target must be integer microseconds')
     pulse = nominal + calibration.trim_us(step)
-    if not MIN_US <= pulse <= MAX_US:
+    if not limits[0] <= pulse <= limits[1]:
         raise ValueError('Calibrated pulse outside servo limits')
     return pulse
 
 
 class Servos:
+    limits = (MIN_US, MAX_US)
+
     def __init__(self, steps):
         self.steps = calibration.validate_steps(steps)
         self.outputs = []
@@ -38,7 +40,7 @@ class Servos:
             raise
 
     def write(self, side, nominal):
-        self.outputs[side].duty_ns(pulse_us(nominal, self.steps[side]) * 1000)
+        self.outputs[side].duty_ns(pulse_us(nominal, self.steps[side], self.limits) * 1000)
 
     def center(self, steps=None):
         steps = self.steps if steps is None else calibration.validate_steps(steps)
@@ -53,3 +55,9 @@ class Servos:
 
     def close(self):
         release(self.outputs)
+
+
+
+class RangeTestServos(Servos):
+    """Unloaded MG90S bench test only."""
+    limits = (500, 2500)

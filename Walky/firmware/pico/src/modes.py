@@ -13,7 +13,8 @@ import servo_check
 
 MODE_FILE = "mode.txt"
 # Every request MODE_FILE accepts. Robot Relay reads this to fill its Arm menu.
-MODES = ("body", "center", "sweep", "once:center", "once:sweep")
+ACTIONS = ("body",) + servo_check.ACTIONS
+MODES = ACTIONS + tuple("once:" + action for action in ACTIONS)
 
 
 def consume():

@@ -141,19 +141,43 @@ struct PowerOnMenuTests {
 
     @Test func menuStartsAtTheBoardsModeAndAppliesOnlyAChange() async {
         let (store, stub) = await store(boot: .armed("body"))
-        #expect(store.bootOptions.map(\.label) == ["nothing", "body", "once: sweep"])
+        #expect(store.bootOptions.map(\.label) == ["nothing", "body", "sweep"])
         #expect(store.selectedBoot == "body")
         #expect(!store.canApplyBoot)
-        store.bootSelection = ""
+        store.selectedBoot = ""
         #expect(store.canApplyBoot)
         store.applyBoot()
         while stub.applied.isEmpty { await Task.yield() }
         #expect(stub.applied == [nil], "nothing deletes mode.txt")
     }
 
+    @Test func frequencyOnlyChangeWritesTheAdvertisedRequest() async {
+        for once in [false, true] {
+            let (store, stub) = await store(boot: .armed(once ? "once:center" : "center"),
+                                            modes: ["center", "once:center"])
+            #expect(store.bootOptions.map(\.value) == ["", "center"])
+            #expect(store.runOnce == once)
+            store.runOnce = !once
+            #expect(store.canApplyBoot)
+            store.applyBoot()
+            while stub.applied.isEmpty { await Task.yield() }
+            #expect(stub.applied == [once ? "center" : "once:center"])
+        }
+    }
+
+    @Test func olderFirmwareFixesFrequencyToSupportedVariant() async {
+        let (store, _) = await store(boot: .idle)
+        store.selectedBoot = "sweep"
+        #expect(store.runOnce && !store.canChooseFrequency)
+        store.runOnce = false
+        #expect(store.runOnce)
+        store.selectedBoot = "body"
+        #expect(!store.runOnce && !store.canChooseFrequency)
+    }
+
     @Test func cantApplyBeforeTheModeIsReadOrWithoutModes() async {
         let (unread, _) = await store(boot: nil)
-        unread.bootSelection = "body"
+        unread.selectedBoot = "body"
         #expect(!unread.canApplyBoot)
         let (old, _) = await store(boot: .idle, modes: [])
         #expect(old.bootOptions.map(\.value) == [""])

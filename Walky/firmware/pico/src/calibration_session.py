@@ -64,16 +64,14 @@ def run(request):
     import network
     import socket
     from machine import Pin, WDT, reset
-    from servo_check import wait_ms
+    from servo_check import countdown, wait_ms
 
     watchdog = WDT(timeout=2000)
     servos = listener = client = ap = None
     led = Pin('LED', Pin.OUT)
     try:
         steps, _ = calibration.load()
-        for _ in range(10):
-            led.toggle()
-            wait_ms(500, watchdog)
+        countdown(led, watchdog)
         servos = Servos(steps)
         servos.center()
         led.on()

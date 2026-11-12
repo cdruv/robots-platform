@@ -6,9 +6,9 @@ return to center. Started by modes.py; importing touches no hardware.
 import time
 from machine import Pin, WDT, reset
 import calibration
-from servo_output import Servos, release, CENTER_US, MIN_US, MAX_US
+from servo_output import RangeTestServos, Servos, release, CENTER_US, MIN_US, MAX_US
 
-ACTIONS = ("center", "sweep")
+ACTIONS = ("center", "sweep", "rotation-check", "range-left", "range-right")
 
 
 def wait_ms(duration, watchdog):
@@ -16,6 +16,12 @@ def wait_ms(duration, watchdog):
     while time.ticks_diff(deadline, time.ticks_ms()) > 0:
         watchdog.feed()
         time.sleep_ms(20)
+
+
+def countdown(led, watchdog):
+    for _ in range(6):
+        led.toggle()
+        wait_ms(500, watchdog)
 
 
 def sweep(servos, side, watchdog):
@@ -27,6 +33,21 @@ def sweep(servos, side, watchdog):
             servos.write(side, current)
             wait_ms(20, watchdog)
         wait_ms(200, watchdog)
+
+
+def sweep_full_range(servos, side, watchdog):
+    # Express the electrical endpoints in nominal coordinates. The output
+    # layer applies the stored trim and validates every resulting pulse.
+    trim = calibration.trim_us(servos.steps[side])
+    low, high = servos.limits
+    current = CENTER_US
+    servos.write(side, current)
+    wait_ms(500, watchdog)
+    for target in (low - trim, high - trim, CENTER_US):
+        while current != target:
+            current += max(-5, min(5, target - current))
+            servos.write(side, current)
+            wait_ms(20, watchdog)
 
 
 def run(action):
@@ -41,16 +62,31 @@ def run(action):
     try:
         steps, _ = calibration.load()
         led = Pin("LED", Pin.OUT)
-        print("Walky:", action, "starts in 5 seconds. Keep shafts clear.")
-        for _ in range(10):
-            led.toggle()
-            wait_ms(500, watchdog)
+        print("Walky:", action, "starts in 3 seconds. Keep shafts clear.")
+        countdown(led, watchdog)
         led.on()
+        if action in ("range-left", "range-right"):
+            servos = RangeTestServos(steps)
+            sweep_full_range(servos, 0 if action == "range-left" else 1, watchdog)
+            return
+        if action == "rotation-check":
+            # A positional servo settles. A continuous servo can keep turning.
+            # Leave the other output idle, even if its trim would cause creep.
+            for side in (1, 0):
+                servos = Servos(steps)
+                direction = -1 if steps[side] < 0 else 1
+                target = CENTER_US + direction * servos.excursion(side)
+                servos.write(side, target)
+                wait_ms(3000, watchdog)
+                servos.close()
+                servos = None
+                if side == 1:
+                    wait_ms(1000, watchdog)
+            return
         servos = Servos(steps)
         servos.center()
-        wait_ms(1000, watchdog)
-
         if action == "sweep":
+            wait_ms(1000, watchdog)
             print("RIGHT / socket 1")
             sweep(servos, 1, watchdog)
             print("LEFT / socket 0")
@@ -58,8 +94,8 @@ def run(action):
             print("Centered; releasing shortly.")
             wait_ms(1000, watchdog)
         else:
-            print("Centering only; releasing in 4 seconds.")
-            wait_ms(4000, watchdog)
+            print("Centering only; releasing in 3 seconds.")
+            wait_ms(3000, watchdog)
     finally:
         servos.close() if servos is not None else release()
         if led is not None:

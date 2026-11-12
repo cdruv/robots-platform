@@ -6,7 +6,7 @@ final class FirmwareStore {
     private(set) var state = FirmwareState()
 
     /// The power-on menu's choice: a mode, or "" for nothing. nil follows the board.
-    var bootSelection: String?
+    private var bootSelection: String?
 
     private(set) var consoleLines: [ConsoleLine] = []
 
@@ -50,19 +50,51 @@ final class FirmwareStore {
         }
     }
 
-    /// The menu: nothing, then the firmware's modes in its order.
+    private var selectedRequest: String {
+        let request = bootSelection ?? currentBoot ?? ""
+        return state.modes.contains(request) ? request : ""
+    }
+
+    private func actionName(_ request: String) -> String {
+        request.hasPrefix("once:") ? String(request.dropFirst(5)) : request
+    }
+
     var bootOptions: [(value: String, label: String)] {
-        [("", "nothing")] + state.modes.map { ($0, PicoArm.menuLabel($0)) }
+        var seen: Set<String> = [""]
+        var options = [("", "nothing")]
+        for request in state.modes {
+            let action = actionName(request)
+            if seen.insert(action).inserted { options.append((action, action)) }
+        }
+        return options
     }
 
     var selectedBoot: String {
-        if let bootSelection, bootOptions.contains(where: { $0.value == bootSelection }) { return bootSelection }
-        if let currentBoot, bootOptions.contains(where: { $0.value == currentBoot }) { return currentBoot }
-        return state.modes.first ?? ""
+        get { actionName(selectedRequest) }
+        set {
+            let once = "once:" + newValue
+            if state.modes.contains(once) && (runOnce || !state.modes.contains(newValue)) {
+                bootSelection = once
+            } else {
+                bootSelection = newValue
+            }
+        }
+    }
+
+    var canChooseFrequency: Bool {
+        !selectedBoot.isEmpty && state.modes.contains(selectedBoot) && state.modes.contains("once:" + selectedBoot)
+    }
+
+    var runOnce: Bool {
+        get { selectedRequest.hasPrefix("once:") }
+        set {
+            guard canChooseFrequency else { return }
+            bootSelection = newValue ? "once:" + selectedBoot : selectedBoot
+        }
     }
 
     var canApplyBoot: Bool {
-        hasDevice && calibration?.blocksUSB != true && !state.isBusy && !state.modes.isEmpty && currentBoot != nil && selectedBoot != currentBoot
+        hasDevice && calibration?.blocksUSB != true && !state.isBusy && !state.modes.isEmpty && currentBoot != nil && selectedRequest != currentBoot
     }
 
     func refreshLocal() {
@@ -80,7 +112,7 @@ final class FirmwareStore {
 
     func applyBoot() {
         guard canApplyBoot else { return }
-        let mode = selectedBoot
+        let mode = selectedRequest
         bootSelection = nil
         Task { await service.setBootMode(mode.isEmpty ? nil : mode) }
     }
@@ -90,6 +122,7 @@ final class FirmwareStore {
     }
 
     private func apply(_ new: FirmwareState) {
+        if new.port != state.port { bootSelection = nil }
         state = new
     }
 }

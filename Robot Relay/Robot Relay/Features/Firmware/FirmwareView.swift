@@ -182,9 +182,12 @@ struct PowerOnModeCard: View {
             HStack(spacing: 10) {
                 if !state.modes.isEmpty {
                     NocturneMenu(
-                        selection: Binding(get: { store.selectedBoot }, set: { store.bootSelection = $0 }),
+                        selection: $store.selectedBoot,
                         options: store.bootOptions
                     )
+                    Toggle("Run once", isOn: $store.runOnce)
+                        .toggleStyle(.checkbox)
+                        .disabled(!store.canChooseFrequency)
                 }
                 Button("Apply") { store.applyBoot() }
                     .buttonStyle(.nocturneSecondary)
@@ -209,10 +212,10 @@ struct PowerOnModeCard: View {
             return text
         }
         var text = AttributedString("""
-            A mode runs on every power-on until changed, including plugging USB in; once: runs on \
-            the next boot only. Nothing moves until then. 
+            Select Run once for the next power-on only. Otherwise the mode runs on every \
+            power-on, including plugging USB in.
             """)
-        var warning = AttributedString("Keep battery off while USB is connected.")
+        var warning = AttributedString(" Keep battery off while USB is connected.")
         warning.foregroundColor = Nocturne.accent300
         text.append(warning)
         return text
