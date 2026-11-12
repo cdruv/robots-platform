@@ -5,6 +5,7 @@
 Walky is a small, two legged robot with a vertically oriented, rectangular chassis. Its 3D printed body shell (163 × 75 × 25 mm) mounts onto a slightly larger backplate (168 × 80 × 23 mm), enclosing the electronics. A Pixel 8 mounts on the front in portrait orientation, with its screen facing outward, so only front camera is accessible.
 
 Two identical legs (84.5 × 21 × 13 mm), each approximately half the chassis height, attach to independent servos on the left and right sides of the body. The servo shafts point outward, forming a horizontal rotation axis across the robot. Each leg swings through a 180° arc behind the robot, opposite the phone screen/face, from pointing down through horizontal at servo center to pointing up.
+Walky’s servos can return to neutral under their own power from any shaft orientation set by hand, including positions outside their 180° commanded arc.
 
 
 
