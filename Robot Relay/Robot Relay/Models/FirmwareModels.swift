@@ -61,6 +61,12 @@ nonisolated struct FirmwareState: Equatable, Sendable {
 
     var hasDevice: Bool { port != nil }
 
+    var filesToUpload: [FirmwareFile] {
+        guard hasLocalFolder, hasDeviceFiles else { return [] }
+        let changed = changedFiles
+        return changed.isEmpty ? files.filter { $0.local != nil } : changed
+    }
+
     /// Local files the board lacks or holds a different version of.
     var changedFiles: [FirmwareFile] {
         guard hasDeviceFiles else { return [] }

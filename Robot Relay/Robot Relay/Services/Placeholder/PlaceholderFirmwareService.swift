@@ -41,8 +41,8 @@ final class PlaceholderFirmwareService: FirmwareService {
     }
 
     func upload() async {
-        let names = current.changedFiles.map(\.name)
-        emit("$ mpremote fs cp \(names.joined(separator: " ")) :", .command)
+        let names = current.filesToUpload.map(\.name)
+        emit("$ mpremote fs --force cp \(names.joined(separator: " ")) :", .command)
         current.files = current.files.map { file in
             var file = file
             if file.local != nil { file.device = file.local }

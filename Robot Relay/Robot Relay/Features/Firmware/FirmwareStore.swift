@@ -39,7 +39,7 @@ final class FirmwareStore {
 
     var hasDevice: Bool { state.hasDevice }
 
-    var canUpload: Bool { hasDevice && calibration?.blocksUSB != true && !state.isBusy && !state.changedFiles.isEmpty }
+    var canUpload: Bool { hasDevice && calibration?.blocksUSB != true && !state.isBusy && !state.filesToUpload.isEmpty }
 
     /// What `mode.txt` holds now: a mode, or "" for none. nil until read.
     var currentBoot: String? {

@@ -75,7 +75,7 @@ final class PicoFirmwareService: FirmwareService {
 
     func upload() async {
         await refreshLocal()
-        let names = current.changedFiles.map(\.name)
+        let names = current.filesToUpload.map(\.name)
         guard !pico.calibrationReserved, !isBusy, !names.isEmpty else {
             if !names.isEmpty { Logger.firmware.notice("firmware upload ignored: \(self.blockedReason, privacy: .public)") }
             return
@@ -83,7 +83,7 @@ final class PicoFirmwareService: FirmwareService {
         let paths = names.map { folder.appendingPathComponent($0).path }
         await busy {
             await pico.withBoard(reportingTo: runner) { [runner] port in
-                let result = await runner.run("mpremote", ["connect", port, "fs", "cp"] + paths + [":"], timeout: .seconds(60)) { result in
+                let result = await runner.run("mpremote", ["connect", port, "fs", "--force", "cp"] + paths + [":"], timeout: .seconds(60)) { result in
                     result.succeeded ? .ok("copied \(names.joined(separator: ", "))") : .failed(result.failureReason)
                 }
                 let summary = "firmware upload to \(port): \(names.joined(separator: ", "))"

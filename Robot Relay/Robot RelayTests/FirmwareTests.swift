@@ -42,9 +42,15 @@ struct FirmwareFileTests {
 
         var state = FirmwareState()
         state.files = files
+        state.hasLocalFolder = true
+        #expect(state.filesToUpload.isEmpty)
         #expect(state.changedFiles.isEmpty, "board files not read yet")
         state.hasDeviceFiles = true
         #expect(state.changedFiles.map(\.name) == ["modes.py"], "board-only files are never uploaded")
+        #expect(state.filesToUpload.map(\.name) == ["modes.py"])
+        state.files = FirmwareFile.merge(local: local, device: local + [device[2]])
+        #expect(state.changedFiles.isEmpty)
+        #expect(state.filesToUpload.map(\.name) == ["main.py", "modes.py"])
     }
 
     @Test func unreadBoardLeavesBoardCopiesUnknown() {

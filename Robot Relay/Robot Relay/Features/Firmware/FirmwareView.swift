@@ -88,7 +88,7 @@ private struct CardHeader: View {
     }
 }
 
-/// The local firmware folder against the board's files; Upload copies the changed ones.
+/// Compares the local firmware folder with the files on the board.
 struct FirmwareFilesCard: View {
     let store: FirmwareStore
     @State private var isChoosingFolder = false
@@ -96,11 +96,23 @@ struct FirmwareFilesCard: View {
     var body: some View {
         let state = store.state
         let changed = state.changedFiles.count
-        Card {
+        let status: String
+        if !state.hasDevice {
+            status = "needs USB"
+        } else if !state.hasLocalFolder {
+            status = "source unavailable"
+        } else if !state.hasDeviceFiles {
+            status = "board files unknown"
+        } else if state.filesToUpload.isEmpty {
+            status = "no source files"
+        } else {
+            status = changed > 0 ? "out of date (\(changed) changed)" : "up to date"
+        }
+        return Card {
             CardHeader(
                 title: "Firmware source",
                 note: "source folder",
-                status: !state.hasDevice ? "needs USB" : !state.hasDeviceFiles ? "—" : changed > 0 ? "\(changed) changed" : "in sync",
+                status: status,
                 isStatusHighlighted: changed > 0
             )
             HStack(spacing: 8) {
@@ -141,7 +153,7 @@ struct FirmwareFilesCard: View {
             Button(state.isBusy ? "Working…" : "Upload firmware") { store.upload() }
                 .buttonStyle(.nocturnePrimary)
                 .disabled(!store.canUpload)
-            Text("Uploads changed Python files from this source folder. New firmware runs at the next power-on.")
+            Text("Uploads changed Python files. If firmware is up to date, uploads all source files again. Firmware runs at the next power-on.")
                 .font(.nocturne(11.5))
                 .foregroundStyle(Nocturne.neutral500)
                 .lineSpacing(2)
