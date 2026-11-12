@@ -12,4 +12,5 @@ There is no shared platform implementation yet, will extract reusable components
 
 ## Robot projects
 
-- [Rovbot — 2WD Romi-based rover](Rovbot/AGENTS.md)
+- [Walky — two legged Pixel-8-based robot](Walky/AGENTS.md)
+- [Rovbot — 2WD Romi-based rover; project stashed](Rovbot/AGENTS.md)
