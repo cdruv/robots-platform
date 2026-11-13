@@ -28,6 +28,12 @@ enum Nocturne {
     static let accent800 = Color(hex: 0x423a6a)
     static let accent900 = Color(hex: 0x2b2741)
 
+    enum Log {
+        static let output = neutral300
+        static let timestamp = neutral500
+        static let error = Color(hex: 0xf0a1ad)
+    }
+
     /// Robot face colors.
     static let eye = Color(hex: 0x3ccfff)
     static let faceGround = Color(hex: 0x0d0712)

@@ -156,11 +156,27 @@ final class PicoFirmwareService: FirmwareService {
     /// Shows the lines the last board read didn't have yet; the whole log when it was rotated.
     private func showNewBootLog(_ log: [String]) {
         guard !log.isEmpty, log != shownBootLog else { return }
-        let fresh = log.starts(with: shownBootLog) ? Array(log.dropFirst(shownBootLog.count)) : log
+        let firstNew = log.starts(with: shownBootLog) ? shownBootLog.count : 0
         shownBootLog = log
-        for line in fresh {
+        for (line, kind) in zip(log, Self.bootLogKinds(log)).dropFirst(firstNew) {
             Logger.pico.info("boot.log: \(line, privacy: .public)")
-            lines.continuation.yield(ConsoleLine(text: "pico: " + line, kind: line.hasPrefix("Traceback") || line.contains("failed") ? .error : .output))
+            lines.continuation.yield(ConsoleLine(text: "pico: " + line, kind: kind))
+        }
+    }
+
+    nonisolated static func bootLogKinds(_ log: [String]) -> [ConsoleLine.Kind] {
+        var inTraceback = false
+        return log.map { line in
+            if line.hasPrefix("Traceback") {
+                inTraceback = true
+                return .error
+            }
+            if inTraceback {
+                // MicroPython ends the indented stack frames with the unindented exception.
+                inTraceback = line.isEmpty || line.first?.isWhitespace == true
+                return .error
+            }
+            return line.contains("failed") ? .error : .output
         }
     }
 

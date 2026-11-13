@@ -54,8 +54,10 @@ struct TelemetryInspector: View {
                         Text(isCurrent ? "0.00" : "\(Fmt.signed(entry.offset, decimals: 2)) s")
                             .frame(width: 56, alignment: .trailing)
                         Text(entry.event.level.label)
+                            .foregroundStyle(TelemetryRow.messageColor(entry.event.level))
                             .frame(width: 38, alignment: .leading)
                         Text(entry.event.message)
+                            .foregroundStyle(TelemetryRow.messageColor(entry.event.level))
                             .truncationMode(.tail)
                     }
                     .lineLimit(1)

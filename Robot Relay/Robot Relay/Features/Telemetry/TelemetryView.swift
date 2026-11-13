@@ -157,9 +157,9 @@ struct TelemetryRow: View {
             Rectangle()
                 .fill(Self.barColor(level))
                 .frame(width: 3)
-                .shadow(color: level == .error ? Nocturne.accent : .clear, radius: 5)
+                .shadow(color: level == .error ? Nocturne.Log.error : .clear, radius: 5)
             Text(time)
-                .foregroundStyle(isSelected ? Nocturne.accent300 : Nocturne.neutral600)
+                .foregroundStyle(isSelected ? Nocturne.accent300 : Nocturne.Log.timestamp)
                 .frame(width: timeWidth, alignment: .leading)
                 .padding(.vertical, 3)
             Text("\(Text(event.source).foregroundStyle(Nocturne.neutral500)) \(event.message)")
@@ -183,7 +183,7 @@ struct TelemetryRow: View {
         case .debug: Nocturne.accent700
         case .info: Nocturne.neutral800
         case .warn: Nocturne.accent300
-        case .error: Nocturne.accent100
+        case .error: Nocturne.Log.error
         case .heard: Nocturne.accent
         }
     }
@@ -191,9 +191,9 @@ struct TelemetryRow: View {
     static func messageColor(_ level: TelemetryEvent.Level) -> Color {
         switch level {
         case .debug: Nocturne.neutral400
-        case .info: Nocturne.text
+        case .info: Nocturne.Log.output
         case .warn: Nocturne.accent300
-        case .error: Nocturne.accent100
+        case .error: Nocturne.Log.error
         case .heard: Nocturne.accent200
         }
     }
@@ -214,7 +214,7 @@ struct TelemetryMinimap: View {
                     guard level == .warn || level == .error else { continue }
                     let y = size.height * CGFloat(index) / count
                     let mark = CGRect(x: 2, y: y, width: size.width - 4, height: level == .error ? 3 : 2)
-                    context.fill(Path(mark), with: .color(level == .error ? Nocturne.accent100 : Nocturne.accent300))
+                    context.fill(Path(mark), with: .color(TelemetryRow.barColor(level)))
                 }
                 let window = CGRect(
                     x: 0.5,

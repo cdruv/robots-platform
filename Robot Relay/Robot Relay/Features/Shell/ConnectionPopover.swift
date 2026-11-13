@@ -165,11 +165,11 @@ private struct ActivityFooter: View {
             .help("Clear activity")
         }
         .font(.nocturneMono(10.5))
-        .foregroundStyle(Nocturne.neutral400)
+        .foregroundStyle(Nocturne.Log.output)
     }
 
     private func line(_ entry: LinkActivity) -> Text {
-        Text("\(Text(entry.date, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute().second()).foregroundStyle(Nocturne.neutral700))  \(command(entry))")
+        Text("\(Text(entry.date, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute().second()).foregroundStyle(Nocturne.Log.timestamp))  \(command(entry))")
     }
 
     private func command(_ entry: LinkActivity) -> Text {
@@ -181,7 +181,7 @@ private struct ActivityFooter: View {
         case .ok(let detail?):
             Text("\(entry.text)  · \(detail)")
         case .failed(let detail):
-            Text("\(entry.text)  · \(Text(detail).foregroundStyle(Nocturne.accent300))")
+            Text("\(entry.text)  · \(detail)").foregroundStyle(Nocturne.Log.error)
         }
     }
 }

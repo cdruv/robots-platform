@@ -242,7 +242,7 @@ struct LegOffsetsCard: View {
             CardHeader(title: "Leg calibration", note: "approximate ° · ±9", status: store.calibration?.phase.rawValue ?? "unavailable")
             let snapshot = store.state.calibration
             if let error = snapshot?.error {
-                Text("Stored calibration error: " + error).foregroundStyle(Nocturne.accent300)
+                Text("Stored calibration error: " + error).foregroundStyle(Nocturne.Log.error)
             }
             if let stored = snapshot?.offsets, store.hasDevice {
                 Text("USB stored: L \(Fmt.signed(stored.left))° · R \(Fmt.signed(stored.right))° · \(snapshot?.stored == true ? "calibrated" : "not calibrated")")
@@ -272,7 +272,7 @@ private struct CalibrationControls: View {
             .fixedSize(horizontal: false, vertical: true)
         if !controller.message.isEmpty {
             Text(controller.message)
-                .foregroundStyle(controller.phase == .error ? Nocturne.accent300 : Nocturne.neutral300)
+                .foregroundStyle(controller.phase == .error ? Nocturne.Log.error : Nocturne.neutral300)
                 .fixedSize(horizontal: false, vertical: true)
         }
         if let recovery = controller.recovery {
@@ -369,10 +369,10 @@ private struct ConsoleRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Rectangle()
-                .fill(line.kind == .error ? Nocturne.accent : Nocturne.neutral800)
+                .fill(line.kind == .error ? Nocturne.Log.error : Nocturne.neutral800)
                 .frame(width: 3)
             Text(line.time, format: .dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits).second(.twoDigits))
-                .foregroundStyle(Nocturne.neutral600)
+                .foregroundStyle(Nocturne.Log.timestamp)
                 .frame(width: 72, alignment: .leading)
                 .padding(.vertical, 2.5)
             Text(line.text)
@@ -390,8 +390,8 @@ private struct ConsoleRow: View {
     private var textColor: Color {
         switch line.kind {
         case .command: Nocturne.neutral200
-        case .output: Nocturne.neutral600
-        case .error: Nocturne.accent300
+        case .output: Nocturne.Log.output
+        case .error: Nocturne.Log.error
         }
     }
 }
