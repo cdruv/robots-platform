@@ -9,12 +9,11 @@ from machine import reset_cause, PWRON_RESET
 
 import bootlog
 import calibration
-import body
 import servo_check
 
 MODE_FILE = "mode.txt"
 # Every request MODE_FILE accepts. Robot Relay reads this to fill its Arm menu.
-ACTIONS = ("body",) + servo_check.ACTIONS
+ACTIONS = servo_check.ACTIONS
 MODES = ACTIONS + tuple("once:" + action for action in ACTIONS)
 
 
@@ -55,7 +54,5 @@ def run():
     bootlog.write("boot: mode " + (mode or "none, idle"))
     if mode is None:
         print("Walky: idle; servo signals off. Nothing runs on this boot.")
-    elif mode == "body":
-        body.main()
     else:
         servo_check.run(mode)

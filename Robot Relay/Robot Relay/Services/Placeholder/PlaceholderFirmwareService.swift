@@ -21,7 +21,7 @@ final class PlaceholderFirmwareService: FirmwareService {
             FirmwareFile(name: "servo_check.py", local: .init(sha: "c022684", bytes: 2691), device: nil),
         ]
         state.bootMode = .armed("body")
-        state.modes = ["body", "center", "sweep", "once:center", "once:sweep"]
+        state.modes = ["center", "sweep", "dance", "once:center", "once:sweep", "once:dance"]
         state.storedOffsets = LegOffsets(left: -2.0, right: 1.5)
         current = state
         states.continuation.yield(state)

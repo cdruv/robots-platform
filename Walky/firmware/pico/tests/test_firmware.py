@@ -24,7 +24,7 @@ def test_no_file_is_idle():
 
 def test_modes_lists_exactly_the_accepted_requests():
     import modes
-    actions = ('body', 'center', 'sweep', 'rotation-check', 'range-left', 'range-right')
+    actions = ('center', 'sweep', 'dance')
     assert modes.MODES == actions + tuple('once:' + action for action in actions)
     for mode in modes.MODES:
         write('mode.txt', mode)
@@ -41,27 +41,13 @@ def test_once_center_is_finite_neutral_and_consumed():
     released()
 
 
-def test_rotation_check_is_one_shot_and_powers_each_side_within_limits():
-    import calibration
-    import servo_check
-    calibration.save((-18, 18))
-    boot('once:rotation-check')
-    assert 'mode.txt' not in os.listdir()
-    assert machine.pulses == [(1, 1600000), (0, 1400000)]
-    assert servo_check.time.now == 10000
-    released()
-
-
 def test_once_sweep_limits_order_and_return_to_center():
     import servo_check
     boot('once:sweep')
     assert 'mode.txt' not in os.listdir()
-    assert all(1400000 <= value <= 1600000 for _, value in machine.pulses)
-    movement = [(pin, value) for pin, value in machine.pulses if value != 1500000]
-    assert movement[0][0] == 1 and movement[-1][0] == 0
-    for pin in (0, 1):
-        assert [v for p, v in machine.pulses if p == pin][-1] == 1500000
-    assert servo_check.time.now <= 10000
+    targets = [1500, 500] + [2500, 500] * 6 + [1500]
+    assert machine.pulses == [(side, us * 1000) for us in targets for side in (0, 1)]
+    assert servo_check.time.now == 9580
     released()
 
 
@@ -80,21 +66,6 @@ def test_plain_mode_runs_again_only_after_power_cycle():
         assert len(machine.pulses) == 2 * first_count
 
 
-def test_body_starts_on_power_on_but_not_after_reset():
-    import body
-    import modes
-    calls = []
-    with replace(body, 'main', lambda: calls.append(True)):
-        boot('body')
-        machine.cause = 3
-        modes.run()
-        assert len(calls) == 1
-        machine.cause = machine.PWRON_RESET
-        modes.run()
-        assert len(calls) == 2
-    assert not machine.outputs
-
-
 def test_plain_mode_skips_watchdog_boot():
     machine.cause = 3
     boot('center')
@@ -106,6 +77,15 @@ def test_interruption_releases_both():
     with raises(KeyboardInterrupt):
         boot('once:sweep')
     released()
+
+
+def test_retired_modes_disarm_without_motion():
+    for action in ('body', 'rotation-check', 'range-left', 'range-right'):
+        for prefix in ('', 'once:'):
+            with raises(ValueError):
+                boot(prefix + action)
+            assert 'mode.txt' not in os.listdir()
+            assert not machine.outputs
 
 
 def test_bad_mode_and_failed_consumption_never_move():
@@ -124,7 +104,8 @@ def test_trimmed_center_and_sweep_stay_in_final_envelope():
     import calibration
     calibration.save((-18, 1))
     boot('once:sweep')
-    assert all(1400000 <= value <= 1600000 for _, value in machine.pulses)
+    assert machine.pulses[2:-2] == [(side, us * 1000) for us in [500] + [2500, 500] * 6
+                                    for side in (0, 1)]
     assert [v for p, v in machine.pulses if p == 0][-1] == 1401000
     assert [v for p, v in machine.pulses if p == 1][-1] == 1506000
     released()
@@ -175,25 +156,6 @@ def test_pulse_outside_bounds_rejected():
         with raises(ValueError):
             servo_output.pulse_us(pulse, 0)
 
-def test_full_range_each_side_starts_at_trimmed_center_and_releases():
-    import calibration
-    import modes
-    calibration.save((-18, 18))
-    for side, mode, center in ((0, 'once:range-left', 1401), (1, 'once:range-right', 1599)):
-        machine.clear()
-        boot(mode)
-        assert 'mode.txt' not in os.listdir()
-        values = []
-        for pin, pulse in machine.pulses:
-            assert pin == side
-            values.append(pulse // 1000)
-        assert values[0] == values[-1] == center
-        assert (min(values), max(values)) == (500, 2500)
-        assert all(abs(values[i] - values[i-1]) <= 5 for i in range(1, len(values)))
-        released()
-        modes.run()
-        assert len(machine.pulses) == len(values)
-
 
 def test_boot_log_records_each_boot_decision():
     import modes
@@ -202,3 +164,24 @@ def test_boot_log_records_each_boot_decision():
     modes.run()
     assert read('boot.log') == ('boot: power-on\nboot: mode none, idle\n'
                                 'boot: reset cause 3, not power-on; nothing runs\n')
+
+
+def test_dance_mirrors_alignment_poses_and_respects_trim_at_extremes():
+    import calibration
+    import servo_check
+    calibration.save((-18, 18))
+    boot('once:dance')
+    assert 'mode.txt' not in os.listdir()
+    left = [v // 1000 for pin, v in machine.pulses if pin == 0]
+    right = [v // 1000 for pin, v in machine.pulses if pin == 1]
+    poses = list(zip(left, right))
+    assert poses[0] == poses[-1] == (1401, 1599)
+    for angle in (-81, -45, 45, 81):
+        assert (1401 + 11 * angle, 1599 - 11 * angle) in poses
+    assert (1896, 1599) in poses and (1401, 1104) in poses
+    for values in (left, right):
+        assert min(values) >= 500 and max(values) <= 2500
+        assert len(values) == 40  # Initial center plus 39 direct pose commands.
+    assert (2292, 2490) in poses and (510, 708) in poses  # Opposed full splits.
+    assert servo_check.time.now - 3000 >= 3 * 2820
+    released()

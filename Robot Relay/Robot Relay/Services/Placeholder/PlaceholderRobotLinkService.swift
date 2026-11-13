@@ -45,7 +45,7 @@ final class PlaceholderRobotLinkService: RobotLinkService {
         continuation.yield(current)
     }
 
-    private static let modes = ["body", "center", "sweep", "once:center", "once:sweep"]
+    private static let modes = ["center", "sweep", "dance", "once:center", "once:sweep", "once:dance"]
 
     private static func connected() -> RobotLinks {
         RobotLinks(

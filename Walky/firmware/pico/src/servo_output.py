@@ -59,5 +59,5 @@ class Servos:
 
 
 class RangeTestServos(Servos):
-    """Unloaded MG90S bench test only."""
+    """Wide travel for unloaded MG90S bench demonstrations."""
     limits = (500, 2500)
