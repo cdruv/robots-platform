@@ -2,8 +2,8 @@
 # Build a private, pinned Unix interpreter. Requires curl, shasum, make, C tools and python3.
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-version=1.28.0
-sha=1e77eb4450ce06098e6c8dba2dce1b2a4d885c24b74a2ba950dde3a1394d4ff6
+version=1.29.0
+sha=8072f6ad42c0e3bbfca88ed09bf8f1106ce207a39129af920f70081b8f2fe286
 cache="$root/.test-runtime"
 mkdir -p "$cache"
 archive="$cache/micropython-$version.tar.gz"

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-interpreter="$root/.test-runtime/micropython-1.28.0/ports/unix/build-walky/micropython"
+interpreter="$root/.test-runtime/micropython-1.29.0/ports/unix/build-walky/micropython"
 if [ ! -x "$interpreter" ]; then
     "$root/tests/setup.sh"
 fi

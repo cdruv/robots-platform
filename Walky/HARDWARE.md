@@ -25,6 +25,7 @@ Walky’s servos can return to neutral under their own power from any shaft orie
 
 ### Notes
 
+- Walky’s Pico 2 W runs [MicroPython v1.29.0](https://micropython.org/resources/firmware/RPI_PICO2_W-20260824-v1.29.0.uf2).
 - The Waveshare carrier is a direct GPIO breakout, without a PCA9685/I2C servo
 controller. Servo signals: left → GP0/socket 0, right → GP1/socket 1 (robot's
 perspective). The Pico generates the PWM.
