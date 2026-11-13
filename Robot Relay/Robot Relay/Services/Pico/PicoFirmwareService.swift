@@ -19,6 +19,7 @@ final class PicoFirmwareService: FirmwareService {
     /// nil when the folder is missing.
     private var local: [PicoFile]?
     private var isBusy = false
+    private var shownBootLog: [String] = []
     private var current: FirmwareState {
         didSet { if current != oldValue { states.continuation.yield(current) } }
     }
@@ -39,13 +40,19 @@ final class PicoFirmwareService: FirmwareService {
         }
         folder = defaults.string(forKey: folderKey).map { URL(fileURLWithPath: $0) } ?? Self.defaultFolder
         current = FirmwareState(folder: folder.path)
-        local = Self.localFiles(in: folder)
+        local = readLocal()
         states.continuation.yield(current)
         runner.report = { [weak self] entry in self?.log(entry) }
         pico.observe { [weak self] link in
+            self?.showNewBootLog(link.bootLog)
             self?.link = link
             self?.update()
         }
+    }
+
+    /// Until a folder is chosen nothing is read, so launching never asks for Documents access.
+    private func readLocal() -> [PicoFile]? {
+        defaults.string(forKey: folderKey) == nil ? nil : Self.localFiles(in: folder)
     }
 
     func state() -> AsyncStream<FirmwareState> { states.stream }
@@ -53,7 +60,7 @@ final class PicoFirmwareService: FirmwareService {
     func console() -> AsyncStream<ConsoleLine> { lines.stream }
 
     func refreshLocal() async {
-        local = Self.localFiles(in: folder)
+        local = readLocal()
         update()
     }
 
@@ -144,6 +151,17 @@ final class PicoFirmwareService: FirmwareService {
         state.calibration = link.calibration
         state.storedOffsets = link.calibration?.offsets
         current = state
+    }
+
+    /// Shows the lines the last board read didn't have yet; the whole log when it was rotated.
+    private func showNewBootLog(_ log: [String]) {
+        guard !log.isEmpty, log != shownBootLog else { return }
+        let fresh = log.starts(with: shownBootLog) ? Array(log.dropFirst(shownBootLog.count)) : log
+        shownBootLog = log
+        for line in fresh {
+            Logger.pico.info("boot.log: \(line, privacy: .public)")
+            lines.continuation.yield(ConsoleLine(text: "pico: " + line, kind: line.hasPrefix("Traceback") || line.contains("failed") ? .error : .output))
+        }
     }
 
     /// A command line, then its result as output; same `$ …` text as the popover's log.

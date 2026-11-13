@@ -51,6 +51,8 @@ nonisolated struct PicoLink: Equatable, Sendable {
     /// The board's `.py` files; nil until read.
     var files: [PicoFile]?
     var calibration: CalibrationSnapshot?
+    /// The firmware's `boot.log`, oldest first, from the last board read.
+    var bootLog: [String] = []
     var railVolts: Double?
     var lastWatchdogReset: Date?
 }

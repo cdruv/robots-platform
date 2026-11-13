@@ -40,6 +40,7 @@ struct CalibrationTests {
     final class Transport: CalibrationTransport {
         var commands: [String] = []
         var previews: [[Int]] = []
+        var nudges: [Int] = []
         var preview = [0, 0]
         var saved = [0, 0]
         var closed = false
@@ -49,8 +50,9 @@ struct CalibrationTests {
         var holdPreview = false
         func connect() async throws {}
         func close() { closed = true }
-        func request(_ command: String, ticket: CalibrationTicket, steps: [Int]?) async throws -> CalibrationReply {
+        func request(_ command: String, ticket: CalibrationTicket, steps: [Int]?, side: Int?) async throws -> CalibrationReply {
             commands.append(command)
+            if command == "nudge" { nudges.append(side!) }
             if command == "preview" {
                 previews.append(steps!)
                 if holdPreview {
@@ -128,6 +130,23 @@ struct CalibrationTests {
         controller.cancel()
         try await waitUntil { controller.phase == .finished }
         #expect(!transport.commands.contains("save"))
+    }
+
+    @Test func nudgeFollowsPendingPreviewAndIsDroppedBySave() async throws {
+        let transport = Transport()
+        let (controller, _, _) = try await ready(transport: transport)
+        controller.nudge(.left)
+        controller.connect()
+        try await waitUntil { controller.phase == .adjusting }
+        controller.offsets.right = 1
+        controller.nudge(.right)
+        try await waitUntil { transport.nudges == [1] }
+        #expect(transport.commands.firstIndex(of: "preview")! < transport.commands.firstIndex(of: "nudge")!)
+        controller.nudge(.left)
+        controller.saveAndFinish()
+        try await waitUntil { controller.phase == .finished }
+        #expect(transport.nudges == [1])
+        #expect(transport.saved == [0, 2])
     }
 
     @Test func saveLostReplyIsUnconfirmed() async throws {

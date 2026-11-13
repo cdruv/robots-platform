@@ -7,6 +7,7 @@ No file means idle. Importing touches no hardware.
 import os
 from machine import reset_cause, PWRON_RESET
 
+import bootlog
 import calibration
 import body
 import servo_check
@@ -41,13 +42,17 @@ def run():
     servo_check.release(())
     # Guard every request (including once:) after watchdog/software resets.
     if reset_cause() != PWRON_RESET:
+        bootlog.write("boot: reset cause %d, not power-on; nothing runs" % reset_cause())
         return
+    bootlog.write("boot: power-on")
     request = calibration.consume_request()
     if request is not None:
+        bootlog.write("boot: calibration request for " + request['ssid'])
         import calibration_session
         calibration_session.run(request)
         return
     mode = consume()
+    bootlog.write("boot: mode " + (mode or "none, idle"))
     if mode is None:
         print("Walky: idle; servo signals off. Nothing runs on this boot.")
     elif mode == "body":

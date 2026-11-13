@@ -189,4 +189,10 @@ struct PowerOnMenuTests {
         #expect(old.bootOptions.map(\.value) == [""])
         #expect(!old.canApplyBoot)
     }
+
+    @Test func bootLogLinesParseInOrder() {
+        let output = "board=Pico|1.28.0\nlog=boot: power-on\nlog=boot: mode none, idle\nmode=\n"
+        #expect(PicoMode.parseBootLog(output) == ["boot: power-on", "boot: mode none, idle"])
+        #expect(PicoMode.parseBootLog("mode=\n").isEmpty)
+    }
 }

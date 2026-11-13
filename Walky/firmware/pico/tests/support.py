@@ -3,7 +3,7 @@ import sys
 import time
 import machine
 
-MODULES = ('main', 'modes', 'servo_check', 'body', 'calibration', 'servo_output', 'calibration_session')
+MODULES = ('main', 'bootlog', 'modes', 'servo_check', 'body', 'calibration', 'servo_output', 'calibration_session')
 
 
 class Clock:

@@ -92,6 +92,24 @@ def test_preview_is_atomic_volatile_and_save_persists():
     assert cal.load() == ((-1, 18), True)
 
 
+def test_nudge_moves_one_leg_and_returns_to_trimmed_centre():
+    session, _ = protocol()
+    session.handle(message('hello'))
+    session.handle(message('preview', 1, steps=[2, -18]))
+    before = len(machine.pulses)
+    session.handle(message('nudge', 2, side=0))
+    assert machine.pulses[before:] == [(0, 1600000), (0, 1511000)]
+    before = len(machine.pulses)
+    reply = session.handle(message('nudge', 3, side=1))
+    assert machine.pulses[before:] == [(1, 1402000), (1, 1401000)]
+    assert reply['preview'] == [2, -18] and not reply['finished']
+    previous = list(machine.pulses)
+    for request_id, side in ((4, 2), (5, True), (6, None)):
+        with raises(ValueError):
+            session.handle(message('nudge', request_id, side=side))
+    assert machine.pulses == previous
+
+
 def test_cancel_discards_preview():
     import calibration as cal
     session, _ = protocol()
@@ -117,12 +135,12 @@ def test_handshake_identity_replay_unknown_commands():
 
 
 def test_deadlines():
-    from calibration_session import expired
-    assert not expired(59999, 0, 0, False)
-    assert expired(60000, 0, 0, False)
-    assert not expired(1999, 0, 0, True)
-    assert expired(2000, 0, 0, True)
-    assert expired(600000, 0, 599999, True)
+    from calibration_session import timeout_reason
+    assert not timeout_reason(59999, 0, 0, False)
+    assert timeout_reason(60000, 0, 0, False) == 'waiting for client'
+    assert not timeout_reason(4999, 0, 0, True)
+    assert timeout_reason(5000, 0, 0, True) == 'client idle'
+    assert timeout_reason(600000, 0, 599999, True) == 'session limit'
 
 
 def test_network_cleanup_on_cancel_disconnect_malformed_and_timeout():
@@ -150,3 +168,21 @@ def test_network_cleanup_on_cancel_disconnect_malformed_and_timeout():
         assert network.WLAN.active_interfaces == {network.WLAN.IF_STA: False, network.WLAN.IF_AP: False}
         if no_client:
             assert clock.now == 63000
+        log = read('boot.log')
+        assert 'access point Walky-Cal-' in log and 'interference mode 3' in log and 'ifconfig' in log
+        assert ('Traceback' in log) == (error is not None)
+        if messages == [hello]:
+            assert 'client idle' in log and 'idle_ms=5000 last=hello id=0' in log and 'ap_active=True stations=1' in log
+        assert ticket()['password'] not in log
+
+
+def test_boot_log_rotates_and_never_raises():
+    fresh()
+    import bootlog
+    for _ in range(300):
+        bootlog.write('x' * 30)
+    assert os.stat(bootlog.FILE)[6] <= bootlog.LIMIT + 31
+    assert bootlog.FILE + '.1' in os.listdir()
+    with replace(bootlog, 'FILE', 'missing/boot.log'):
+        bootlog.write('lost')
+        bootlog.exception(ValueError('lost'))

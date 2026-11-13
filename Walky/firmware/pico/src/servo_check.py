@@ -5,6 +5,7 @@ return to center. Started by modes.py; importing touches no hardware.
 """
 import time
 from machine import Pin, WDT, reset
+import bootlog
 import calibration
 from servo_output import RangeTestServos, Servos, release, CENTER_US, MIN_US, MAX_US
 
@@ -96,6 +97,10 @@ def run(action):
         else:
             print("Centering only; releasing in 3 seconds.")
             wait_ms(3000, watchdog)
+    except BaseException as error:
+        bootlog.write("servo check " + action + ": failed")
+        bootlog.exception(error)
+        raise
     finally:
         servos.close() if servos is not None else release()
         if led is not None:

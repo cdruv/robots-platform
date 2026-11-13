@@ -2,6 +2,11 @@
 
 modes.py picks what runs, from mode.txt.
 """
-import modes
+import bootlog
 
-modes.run()
+try:
+    import modes
+    modes.run()
+except BaseException as error:
+    bootlog.exception(error)
+    raise

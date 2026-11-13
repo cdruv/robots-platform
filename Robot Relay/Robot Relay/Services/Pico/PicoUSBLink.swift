@@ -36,9 +36,10 @@ final class PicoUSBLink {
 
     func releaseCalibration() {
         calibrationReserved = false
-        Logger.pico.info("Pico USB released, board is re-read on next plug")
+        Logger.pico.info("Pico USB released\(self.current.port == nil ? ", board is re-read on next plug" : ", re-reading board", privacy: .public)")
         observers.forEach { $0(current) }
-        // Do not interrupt a still-powered board; next USB attachment refreshes it.
+        // The session is over on the Mac side, so a read can't disturb it.
+        refresh()
     }
     /// mpremote calls run one at a time; two would fight over the port.
     private var tail: Task<Void, Never>?
@@ -146,6 +147,7 @@ final class PicoUSBLink {
         (link.board, link.runtime) = PicoMode.parseBoard(output) ?? (nil, nil)
         link.files = PicoMode.parseFiles(output)
         link.calibration = PicoMode.parseCalibration(output)
+        link.bootLog = PicoMode.parseBootLog(output)
         current = link
         return link.arm != nil
     }
@@ -180,7 +182,15 @@ nonisolated enum PicoMode {
         + "[print('file=%s,%d,%s' % (n, os.stat(n)[6], binascii.hexlify(hashlib.sha256(open(n, 'rb').read()).digest()).decode())) for n in f if n.endswith('.py')]; "
         + "print('mode=' + (open('\(file)').read().strip() if '\(file)' in f else '')); "
         + "print('calibration=' + (__import__('json').dumps(__import__('calibration').snapshot()) if 'calibration.py' in f else 'null')); "
+        + "[print('log=' + l) for n in ('boot.log.1', 'boot.log') if n in f for l in open(n).read().split('\\n') if l]; "
         + "print('modes=' + (','.join(__import__('\(module)').MODES) if '\(module).py' in f else ''))"
+
+    /// The `log=` lines of `readScript`'s output: the firmware's `boot.log`, oldest first.
+    static func parseBootLog(_ output: String) -> [String] {
+        output.split(whereSeparator: \.isNewline).compactMap { line in
+            line.hasPrefix("log=") ? String(line.dropFirst(4)) : nil
+        }
+    }
 
     static func parseCalibration(_ output: String) -> CalibrationSnapshot? {
         guard let raw = value(of: "calibration", in: output), raw != "null", let data = raw.data(using: .utf8) else { return nil }

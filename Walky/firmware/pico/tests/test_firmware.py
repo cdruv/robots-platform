@@ -193,3 +193,12 @@ def test_full_range_each_side_starts_at_trimmed_center_and_releases():
         released()
         modes.run()
         assert len(machine.pulses) == len(values)
+
+
+def test_boot_log_records_each_boot_decision():
+    import modes
+    modes.run()
+    machine.cause = 3
+    modes.run()
+    assert read('boot.log') == ('boot: power-on\nboot: mode none, idle\n'
+                                'boot: reset cause 3, not power-on; nothing runs\n')

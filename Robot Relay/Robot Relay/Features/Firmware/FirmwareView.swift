@@ -289,6 +289,7 @@ private struct CalibrationControls: View {
                         OffsetStepper(value: $controller.offsets[side], step: LegOffsets.step, range: LegOffsets.range)
                         let index = side == .left ? 0 : 1
                         Text(controller.pulses.indices.contains(index) ? "\(controller.pulses[index]) µs applied" : "awaiting reply")
+                        Button("Wiggle") { controller.nudge(side) }.buttonStyle(.nocturneGhost)
                     }
                 }
             }

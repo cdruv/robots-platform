@@ -26,6 +26,7 @@ final class CalibrationController {
     private var work: Task<Void, Never>?
     private var wantsSave = false
     private var wantsCancel = false
+    private var pendingNudge: LegSide?
 
     var blocksUSB: Bool { [.preparing, .awaitingBoot, .connecting, .adjusting, .saving, .finishing].contains(phase) }
     var canConnect: Bool { phase == .awaitingBoot && !board.isUSBConnected }
@@ -64,6 +65,7 @@ final class CalibrationController {
         isStored = snapshot.stored == true
         wantsCancel = false
         wantsSave = false
+        pendingNudge = nil
         recovery = nil
         set(.preparing, "Preparing one calibration boot over USB…")
         work = Task {
@@ -75,7 +77,7 @@ final class CalibrationController {
                 if wantsCancel {
                     await cancelPending(ticket)
                 } else {
-                    set(.awaitingBoot, "Disconnect USB. Place Walky on its back, legs clear, and turn battery power on. After the three-second countdown, connect within 60 seconds.")
+                    set(.awaitingBoot, "Disconnect USB. Lay Walky face down, legs clear, and turn battery power on. After the three-second countdown, connect within 60 seconds.")
                 }
             } catch {
                 Logger.calibration.error("calibration prepare over USB failed (arming attempted: \(armingAttempted ? "yes, disarming" : "no", privacy: .public)): \(error.localizedDescription, privacy: .public)")
@@ -88,7 +90,7 @@ final class CalibrationController {
 
     func connect() {
         guard canConnect, let ticket else { return }
-        set(.connecting, "Switching Mac Wi-Fi to \(ticket.ssid)…")
+        set(.connecting, "Looking for robot Wi-Fi \(ticket.ssid)…")
         work = Task {
             var handshakeReceived = false
             do {
@@ -102,7 +104,7 @@ final class CalibrationController {
                 handshakeReceived = true
                 apply(hello)
                 offsets = applied!
-                set(.adjusting, "Connected over calibration Wi-Fi. Adjust both legs to match, perpendicular to the body’s bottom. Positive trim increases pulse width; physical direction depends on the servo.")
+                set(.adjusting, "Connected over calibration Wi-Fi; both legs are held at centre. Look from the side, along the servo axis, and trim until the near leg hides the far one. Wiggle each leg to check sides: the leg steps toward + trim and back. If Left moves the robot’s own right leg, cancel, power off and swap the servo plugs between sockets 0 and 1.")
                 while true {
                     if wantsCancel || Task.isCancelled {
                         _ = try await transport.request("cancel", ticket: ticket, steps: nil)
@@ -130,6 +132,11 @@ final class CalibrationController {
                         apply(reply)
                         await finish()
                         return
+                    } else if let side = pendingNudge {
+                        pendingNudge = nil
+                        let reply = try await transport.request("nudge", ticket: ticket, steps: nil, side: side == .left ? 0 : 1)
+                        guard reply.preview == steps, !reply.finished else { throw CalibrationFailure("Wiggle was not acknowledged") }
+                        apply(reply)
                     } else {
                         let reply = try await transport.request("heartbeat", ticket: ticket, steps: nil)
                         guard !reply.finished else { throw CalibrationFailure("Calibration session ended") }
@@ -150,9 +157,16 @@ final class CalibrationController {
         }
     }
 
+    /// Briefly steps one leg toward + trim and back, to check side and direction.
+    func nudge(_ side: LegSide) {
+        guard phase == .adjusting else { return }
+        pendingNudge = side
+    }
+
     func saveAndFinish() {
         guard phase == .adjusting else { return }
         wantsSave = true
+        pendingNudge = nil
         // Freeze controls immediately; the worker first flushes the latest preview.
         set(.saving, "Applying final preview and saving…")
     }

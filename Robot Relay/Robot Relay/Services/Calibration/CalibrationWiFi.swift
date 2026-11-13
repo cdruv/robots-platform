@@ -28,19 +28,41 @@ actor MacCalibrationWiFi: CalibrationWiFi {
         // Persist only names for recovery following app termination, never passwords.
         UserDefaults.standard.set(previous, forKey: "calibrationPreviousSSID")
         UserDefaults.standard.set(temporary, forKey: "calibrationTemporarySSID")
+        var robots: Set<String> = []
         for attempt in 0..<12 {
             try Task.checkCancellation()
-            Logger.calibration.debug("scanning for calibration Wi-Fi (\(attempt + 1, privacy: .public) of 12)")
-            let networks = try interface.scanForNetworks(withName: ticket.ssid)
+            let networks = try interface.scanForNetworks(withName: nil)
+            let named = networks.compactMap(\.ssid)
+            robots.formUnion(named.filter { $0.hasPrefix("Walky-Cal-") })
+            Logger.calibration.info("scan \(attempt + 1, privacy: .public) of 12 for \"\(ticket.ssid, privacy: .public)\": \(networks.count, privacy: .public) networks, \(networks.count - named.count, privacy: .public) without names, robot networks seen: [\(robots.sorted().joined(separator: ", "), privacy: .public)]")
             if let network = networks.first(where: { $0.ssid == ticket.ssid }) {
                 try interface.associate(to: network, password: ticket.password)
-                Logger.calibration.info("joined calibration Wi-Fi, will restore \(self.previous.map { "\"\($0)\"" } ?? "no previous network", privacy: .public)")
+                Logger.calibration.info("joined calibration Wi-Fi \"\(ticket.ssid, privacy: .public)\", will restore \(self.previous.map { "\"\($0)\"" } ?? "no previous network", privacy: .public)")
+                try await waitForRobotAddress(interface.interfaceName ?? "en0", ssid: ticket.ssid)
                 return
             }
             if attempt < 11 { try await Task.sleep(for: .seconds(2)) }
         }
-        Logger.calibration.error("calibration Wi-Fi not found after 12 scans (~24 s)")
-        throw CalibrationFailure("Robot Wi-Fi not found. Check battery power and the one-time calibration boot; re-arm over USB if it timed out.")
+        Logger.calibration.error("calibration Wi-Fi \"\(ticket.ssid, privacy: .public)\" not found after 12 scans, other robot networks seen: [\(robots.sorted().joined(separator: ", "), privacy: .public)]")
+        let others = robots.subtracting([ticket.ssid])
+        throw CalibrationFailure(others.isEmpty
+            ? "\(ticket.ssid) not found. The Pico's LED should blink for 3 s after battery power-on, then stay on. If it never blinked, power it off and on again, then re-prepare."
+            : "\(ticket.ssid) not found, but \(others.sorted().joined(separator: ", ")) is up. The Pico is running an older calibration request; power it off and re-prepare.")
+    }
+
+    private func waitForRobotAddress(_ name: String, ssid: String) async throws {
+        var addresses: [String] = []
+        for _ in 0..<20 {
+            addresses = InterfaceAddresses.ipv4(name)
+            if let address = addresses.first(where: { $0.hasPrefix("192.168.4.") }) {
+                Logger.calibration.info("\(name, privacy: .public) got \(address, privacy: .public) from the robot")
+                return
+            }
+            try await Task.sleep(for: .milliseconds(500))
+        }
+        let found = addresses.isEmpty ? "none" : addresses.joined(separator: ", ")
+        Logger.calibration.error("no 192.168.4.x address on \(name, privacy: .public) after 10 s, IPv4: \(found, privacy: .public)")
+        throw CalibrationFailure("Joined \(ssid), but the robot gave this Mac no address within 10 s (\(name) IPv4: \(found)).")
     }
 
     func restore() async -> String? {
@@ -176,6 +198,25 @@ struct CalibrationKeychain: CalibrationTicketStorage {
     func clear() {
         precondition(!RobotServices.isTestHost)
         SecItemDelete(query as CFDictionary)
+    }
+}
+
+nonisolated enum InterfaceAddresses {
+    static func ipv4(_ name: String) -> [String] {
+        var head: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&head) == 0, let first = head else { return [] }
+        defer { freeifaddrs(head) }
+        var result: [String] = []
+        for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let entry = pointer.pointee
+            guard String(cString: entry.ifa_name) == name, let address = entry.ifa_addr,
+                  address.pointee.sa_family == UInt8(AF_INET) else { continue }
+            var host = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            if getnameinfo(address, socklen_t(address.pointee.sa_len), &host, socklen_t(host.count), nil, 0, NI_NUMERICHOST) == 0 {
+                result.append(String(cString: host))
+            }
+        }
+        return result
     }
 }
 
