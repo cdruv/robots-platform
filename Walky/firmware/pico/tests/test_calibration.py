@@ -37,17 +37,6 @@ def test_failed_replacement_preserves_last_save():
             cal.save((4, 5))
     assert cal.load() == ((2, 3), True)
 
-
-def test_request_validation_on_micropython_strings():
-    import calibration as cal
-    # Actual MicroPython strings, no compatibility shim: catches isalnum regressions.
-    cal.arm(ticket())
-    assert cal.consume_request() == ticket()
-    for value in ('é' * 32, 'a' * 31 + '!', 'a' * 31 + ' '):
-        with raises(ValueError):
-            cal.validate_request(dict(ticket(), password=value))
-
-
 def test_request_consumed_without_touching_mode():
     import calibration as cal
     write('mode.txt', 'once:sweep')

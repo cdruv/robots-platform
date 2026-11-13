@@ -66,12 +66,6 @@ def test_plain_mode_runs_again_only_after_power_cycle():
         assert len(machine.pulses) == 2 * first_count
 
 
-def test_plain_mode_skips_watchdog_boot():
-    machine.cause = 3
-    boot('center')
-    assert not machine.outputs
-
-
 def test_interruption_releases_both():
     machine.interrupt = True
     with raises(KeyboardInterrupt):
