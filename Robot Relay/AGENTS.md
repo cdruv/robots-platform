@@ -13,4 +13,4 @@ Install with `scripts/install_local.sh` (Release build into `/Applications`), or
 
 ## Logging
 
-Diagnostics use `os.Logger` through `Logger.<category>` from `App/Logging.swift` (`app`, `command`, `pico`, `firmware`, `phone`, `calibration`, `telemetry`).
+Diagnostics use `os.Logger` through `Logger.<category>` from `Robot Relay/App/Logging.swift`.
