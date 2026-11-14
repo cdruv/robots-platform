@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vadymsidorov.walky.Runtime
 import com.vadymsidorov.walky.core.telemetry.TelemetryEvent
+import com.vadymsidorov.walky.core.telemetry.groupDebugEvents
 import com.vadymsidorov.walky.core.telemetry.presentation
 import com.vadymsidorov.walky.core.telemetry.toJsonLine
 import com.vadymsidorov.walky.senses.HearingState
@@ -120,7 +121,12 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
     var fontSize by rememberSaveable { mutableIntStateOf(13) }
     var settings by rememberSaveable { mutableStateOf(false) }
     val filter = DebugLogFilter(showPartial, showMotion, showSpeech, showSystem)
-    val visibleEvents = remember(events, filter) { events.asReversed().filter(filter::includes) }
+    var groupedKinds by rememberSaveable { mutableStateOf(arrayListOf("Motion")) }
+    var windowSeconds by rememberSaveable { mutableIntStateOf(15) }
+    val visibleEvents = remember(events, filter) { events.filter(filter::includes) }
+    val rows = remember(visibleEvents, groupedKinds, windowSeconds) {
+        groupDebugEvents(visibleEvents, groupedKinds.toSet(), windowSeconds)
+    }
     val listState = rememberLazyListState()
     var following by remember { mutableStateOf(true) }
     var userScrolling by remember { mutableStateOf(false) }
@@ -144,7 +150,7 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
         }
     }
     // Key on sequence, not count: the ring buffer stays at 300 entries when full.
-    LaunchedEffect(visibleEvents.firstOrNull()?.seq, following, settings, listState.isScrollInProgress) {
+    LaunchedEffect(visibleEvents.lastOrNull()?.seq, following, settings, listState.isScrollInProgress) {
         if (following && !settings && !listState.isScrollInProgress) listState.scrollToItem(0)
     }
     val time = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
@@ -226,6 +232,19 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
                     FilterButton("System / other", showSystem) { showSystem = !showSystem }
                     BasicText("Warnings and errors always visible", style = Mono.copy(color = Dim))
                     Spacer(Modifier.height(8.dp))
+                    BasicText("Group events within", style = Mono.copy(color = Bright))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(5, 15, 30, 60).forEach { seconds ->
+                            DebugButton("${seconds}s", windowSeconds == seconds) { windowSeconds = seconds }
+                        }
+                    }
+                    BasicText("Group by event kind", style = Mono.copy(color = Bright))
+                    val availableKinds = (events.map { it.kind } + groupedKinds + "Motion").toSortedSet()
+                    availableKinds.forEach { kind ->
+                        FilterButton(kind, kind in groupedKinds) {
+                            groupedKinds = ArrayList(if (kind in groupedKinds) groupedKinds - kind else groupedKinds + kind)
+                        }
+                    }
                     BasicText("Log font size", style = Mono.copy(color = Bright))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(11, 13, 16, 19).forEach { size ->
@@ -236,7 +255,10 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
                 }
             } else {
                 LazyColumn(Modifier.fillMaxSize().nestedScroll(scrollConnection), state = listState, reverseLayout = true) {
-                    items(visibleEvents, key = { it.seq }) { event -> EventRow(event, time, fontSize) }
+                    items(rows, key = { it.first().seq }) { group ->
+                        if (group.size == 1) EventRow(group.first(), time, fontSize)
+                        else GroupRow(group, time, fontSize)
+                    }
                 }
                 if (visibleEvents.isEmpty()) BasicText("No logs to show", style = Mono.copy(color = Dim))
             }
@@ -265,6 +287,34 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
 }
 
 @Composable
+private fun GroupRow(events: List<TelemetryEvent>, time: SimpleDateFormat, fontSize: Int) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val latest = events.last()
+    val unit = if (latest.kind == "Motion") "actions" else "events"
+    val style = Mono.copy(fontSize = fontSize.sp, lineHeight = (fontSize + 4).sp)
+    Column(Modifier.fillMaxWidth()) {
+        BasicText(
+            buildAnnotatedString {
+                append(if (expanded) "▾ " else "▸ ")
+                withStyle(SpanStyle(color = Timestamp)) { append(time.format(Date(latest.tsWallMs))) }
+                append("  ${latest.kind}  ${events.size} $unit")
+            },
+            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 5.5.dp),
+            style = style.copy(color = Bright),
+        )
+        if (expanded) {
+            Column(Modifier.padding(start = 14.dp)) {
+                events.forEach { event ->
+                    SelectionContainer {
+                        BasicText(event.toJsonLine(), modifier = Modifier.padding(vertical = 4.dp), style = style.copy(color = Bright))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun EventRow(event: TelemetryEvent, time: SimpleDateFormat, fontSize: Int) {
     val logStyle = Mono.copy(fontSize = fontSize.sp, lineHeight = (fontSize + 4).sp)
     var expanded by remember(event.seq) { mutableStateOf(false) }
@@ -279,8 +329,9 @@ private fun EventRow(event: TelemetryEvent, time: SimpleDateFormat, fontSize: In
     Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 5.5.dp)) {
         BasicText(
             buildAnnotatedString {
+                append(if (expanded) "▾ " else "▸ ")
                 withStyle(SpanStyle(color = Timestamp)) { append(time.format(Date(event.tsWallMs))) }
-                append("  ${summary.label}  ${event.source}  ${if (expanded) "−" else "+"}")
+                append("  ${summary.label}  ${event.source}")
             },
             style = logStyle.copy(color = color),
         )
