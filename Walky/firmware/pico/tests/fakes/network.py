@@ -1,6 +1,7 @@
 class WLAN:
     IF_STA, IF_AP, SEC_WPA_WPA2 = 0, 1, 4194308
     active_interfaces = {}
+    configured = None
 
     def __init__(self, interface):
         self.interface = interface
@@ -23,9 +24,9 @@ class WLAN:
         return [b'\x02\x00\x00\x00\x00\x01']
 
     def config(self, **kwargs):
-        assert 'channel' not in kwargs
         assert kwargs['security'] == self.SEC_WPA_WPA2
         assert len(kwargs['key']) >= 16
+        WLAN.configured = kwargs
 
     def ifconfig(self, value=None):
         if value is None:

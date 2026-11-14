@@ -22,7 +22,7 @@ final class PlaceholderFirmwareService: FirmwareService {
         ]
         state.bootMode = .armed("body")
         state.modes = ["center", "sweep", "dance", "once:center", "once:sweep", "once:dance"]
-        state.storedOffsets = LegOffsets(left: -2.0, right: 1.5)
+        state.calibration = CalibrationSnapshot(version: 1, board: "e66118604b", steps: [-4, 3], stored: true)
         current = state
         states.continuation.yield(state)
         emit("$ mpremote connect /dev/cu.usbmodem14201 exec …", .command)

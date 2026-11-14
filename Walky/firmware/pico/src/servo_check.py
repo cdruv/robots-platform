@@ -7,7 +7,7 @@ import time
 from machine import Pin, WDT, reset
 import bootlog
 import calibration
-from servo_output import RangeTestServos, Servos, release, CENTER_US
+from servo_output import Servos
 
 ACTIONS = ("center", "sweep", "dance")
 
@@ -26,26 +26,20 @@ def countdown(led, watchdog):
 
 
 def sweep(servos, watchdog):
-    centers = servos.center()
+    servos.set_degrees(0, 0)
     wait_ms(300, watchdog)
-    low, high = servos.limits
-    # Equal electrical endpoints move the outward-facing shafts in opposite
-    # physical directions. Express each endpoint relative to its trimmed center.
-    for endpoint in (low,) + (high, low) * 6:
-        for side, center in enumerate(centers):
-            servos.write(side, CENTER_US + (endpoint - center))
+    # Opposite physical directions, so both pulses reach the same end together.
+    for left in (-90,) + (90, -90) * 6:
+        servos.set_degrees(left, -left)
         wait_ms(460, watchdog)
-    servos.center()
+    servos.set_degrees(0, 0)
     wait_ms(300, watchdog)
 
 
 def dance(servos, watchdog):
     # Angles are offsets from horizontal (90 degrees on the servo dial).
-    # The outward-facing shafts require opposite pulse changes for parallel legs.
-    # Use the largest whole-degree excursion both legs can mirror with their trims.
-    low, high = servos.limits
-    centers = servos.center()
-    peak = min(min(center - low, high - center) for center in centers) // 11
+    peak = servos.span()
+    servos.set_degrees(0, 0)
     # Send each destination immediately so the servo sets its own travel speed.
     # Dwell times include travel, with extra time for the full-arc reversal.
     wait_ms(300, watchdog)
@@ -66,8 +60,7 @@ def dance(servos, watchdog):
         (30, 30, 140), (-30, -30, 180), (30, 30, 180), (-30, -30, 180),
         (60, 60, 240), (0, 0, 300),
     ):
-        servos.write(0, CENTER_US + left * 11)
-        servos.write(1, CENTER_US - right * 11)
+        servos.set_degrees(left, right)
         wait_ms(dwell_ms, watchdog)
 
 
@@ -78,23 +71,23 @@ def run(action):
     # disabled, so successful completion also resets; modes.py does not
     # restart an action after that reset.
     watchdog = WDT(timeout=2000)
-    servos = None
+    servos = Servos()
     led = None
     try:
-        steps, _ = calibration.load()
+        steps, _, error = calibration.load()
+        if error:
+            bootlog.write("servo check " + action + ": untrimmed, " + error)
+        servos.set_trim(steps)
         led = Pin("LED", Pin.OUT)
         print("Walky:", action, "starts in 3 seconds. Keep shafts clear.")
         countdown(led, watchdog)
         led.on()
-        if action in ("dance", "sweep"):
-            servos = RangeTestServos(steps)
-            if action == "sweep":
-                sweep(servos, watchdog)
-            else:
-                dance(servos, watchdog)
+        if action == "sweep":
+            sweep(servos, watchdog)
+        elif action == "dance":
+            dance(servos, watchdog)
         else:
-            servos = Servos(steps)
-            servos.center()
+            servos.set_degrees(0, 0)
             print("Centering only; releasing in 3 seconds.")
             wait_ms(3000, watchdog)
     except BaseException as error:
@@ -102,7 +95,7 @@ def run(action):
         bootlog.exception(error)
         raise
     finally:
-        servos.close() if servos is not None else release()
+        servos.release()
         if led is not None:
             led.off()
         # Also handles Ctrl-C/errors.

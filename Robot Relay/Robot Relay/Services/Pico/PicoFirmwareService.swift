@@ -65,8 +65,8 @@ final class PicoFirmwareService: FirmwareService {
     }
 
     func setFolder(_ folder: URL?) async {
-        guard !pico.calibrationReserved, !isBusy else {
-            Logger.firmware.notice("firmware folder change ignored: \(self.blockedReason, privacy: .public)")
+        guard !isBusy else {
+            Logger.firmware.notice("firmware folder change ignored: another board operation is running")
             return
         }
         let folder = folder?.standardizedFileURL ?? Self.defaultFolder
@@ -83,8 +83,8 @@ final class PicoFirmwareService: FirmwareService {
     func upload() async {
         await refreshLocal()
         let names = current.filesToUpload.map(\.name)
-        guard !pico.calibrationReserved, !isBusy, !names.isEmpty else {
-            if !names.isEmpty { Logger.firmware.notice("firmware upload ignored: \(self.blockedReason, privacy: .public)") }
+        guard !isBusy, !names.isEmpty else {
+            if !names.isEmpty { Logger.firmware.notice("firmware upload ignored: another board operation is running") }
             return
         }
         let paths = names.map { folder.appendingPathComponent($0).path }
@@ -105,8 +105,8 @@ final class PicoFirmwareService: FirmwareService {
 
     func setBootMode(_ mode: String?) async {
         if let mode, !link.modes.contains(mode) { return }
-        guard !pico.calibrationReserved, !isBusy else {
-            Logger.firmware.notice("power-on mode change ignored: \(self.blockedReason, privacy: .public)")
+        guard !isBusy else {
+            Logger.firmware.notice("power-on mode change ignored: another board operation is running")
             return
         }
         let script = mode.map(PicoMode.armScript) ?? PicoMode.disarmScript
@@ -121,10 +121,6 @@ final class PicoFirmwareService: FirmwareService {
                 }
             }
         }
-    }
-
-    private var blockedReason: String {
-        pico.calibrationReserved ? "board reserved for calibration" : "another board operation is running"
     }
 
     private func busy(_ work: () async -> Void) async {
@@ -147,9 +143,8 @@ final class PicoFirmwareService: FirmwareService {
         state.files = FirmwareFile.merge(local: local ?? [], device: link.files)
         state.bootMode = link.arm
         state.modes = link.modes
-        state.isBusy = isBusy || pico.calibrationReserved
+        state.isBusy = isBusy
         state.calibration = link.calibration
-        state.storedOffsets = link.calibration?.offsets
         current = state
     }
 

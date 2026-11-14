@@ -51,9 +51,8 @@ nonisolated struct FirmwareState: Equatable, Sendable {
     var modes: [String] = []
     /// An upload or mode change is running.
     var isBusy = false
-    /// nil: leg calibration isn't on the board yet.
+    /// The trim stored on the board; nil when its firmware has no calibration module.
     var calibration: CalibrationSnapshot?
-    var storedOffsets: LegOffsets?
 
     init(folder: String = "") {
         self.folder = folder
@@ -81,7 +80,7 @@ nonisolated enum LegSide: CaseIterable, Sendable {
     var pin: String { self == .left ? "GP0" : "GP1" }
 }
 
-/// Per-leg trim in degrees from neutral 90.
+/// Per-leg trim in degrees. The Pico stores it as half-degree steps.
 nonisolated struct LegOffsets: Equatable, Sendable {
     static let range: ClosedRange<Double> = -9...9
     static let step = 0.5
@@ -94,15 +93,6 @@ nonisolated struct LegOffsets: Equatable, Sendable {
         set {
             if side == .left { left = newValue } else { right = newValue }
         }
-    }
-}
-
-nonisolated enum ServoMath {
-    static let centerMicros = 1500.0
-    static let microsPerDegree = 11.0
-
-    static func pulseMicros(offsetDegrees: Double) -> Int {
-        Int(centerMicros) + Int((offsetDegrees * microsPerDegree).rounded(.toNearestOrAwayFromZero))
     }
 }
 

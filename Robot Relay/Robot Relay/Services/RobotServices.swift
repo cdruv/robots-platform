@@ -7,8 +7,7 @@ struct RobotServices {
     var telemetry: any TelemetryService
     var live: any LiveStreamService
     var firmware: any FirmwareService
-    var drive: any DriveService
-    var calibration: CalibrationController? = nil
+    var body: any BodyService
 
     /// True in the app that hosts the unit tests. The host gets placeholder services, and the
     /// network, USB and process entry points refuse to run, so no test reaches real hardware.
@@ -21,11 +20,12 @@ struct RobotServices {
             telemetry: PlaceholderTelemetryService(),
             live: PlaceholderLiveStreamService(),
             firmware: PlaceholderFirmwareService(),
-            drive: PlaceholderDriveService()
+            body: PlaceholderBodyService()
         )
     }
 
-    /// The phone link, its telemetry and the Pico over USB (status and firmware) are real.
+    /// The phone link, its telemetry, the body link through it and the Pico over USB (status
+    /// and firmware) are real.
     /// Everything else reports no data, so the UI shows dashes instead of canned values.
     static func live() -> RobotServices {
         let phone = PhoneConnection()
@@ -36,10 +36,7 @@ struct RobotServices {
             telemetry: PhoneTelemetryService(connection: phone),
             live: UnavailableLiveStreamService(),
             firmware: PicoFirmwareService(robotID: "walky", pico: pico),
-            drive: PlaceholderDriveService(),
-            calibration: CalibrationController(board: PicoCalibrationBoard(pico: pico), wifi: MacCalibrationWiFi(),
-                transport: CalibrationTCPTransport(), storage: CalibrationKeychain(),
-                permission: { try await CalibrationLocationPermission().request() })
+            body: PhoneBodyService(connection: phone)
         )
     }
 }
@@ -72,7 +69,7 @@ protocol LiveStreamService: AnyObject {
     func setMuted(_ isMuted: Bool) async
 }
 
-/// Pico firmware and board configuration over `mpremote`; live calibration is separate.
+/// Pico firmware and board configuration over `mpremote`.
 protocol FirmwareService: AnyObject {
     /// Current state followed by every change. Single consumer.
     func state() -> AsyncStream<FirmwareState>
@@ -91,14 +88,18 @@ protocol FirmwareService: AnyObject {
     func setBootMode(_ mode: String?) async
 }
 
-/// Manual driving from a game controller. Not designed yet.
-protocol DriveService: AnyObject {
-    func send(_ command: DriveCommand) async
-}
-
-nonisolated struct DriveCommand: Equatable, Sendable {
-    /// Forward speed, −1…1.
-    var linear: Double
-    /// Turn rate, −1…1.
-    var angular: Double
+/// The legs, through the phone's link to the Pico. Calls are dropped while that link is down.
+protocol BodyService: AnyObject {
+    /// The phone's latest report followed by every change; nil while the phone is not
+    /// connected. Single consumer.
+    func states() -> AsyncStream<BodyLink?>
+    /// Leg targets in degrees from horizontal. Sent once: the Pico lets the legs go limp
+    /// 500 ms after the last target, so the caller repeats this to hold a pose.
+    func drive(left: Double, right: Double)
+    /// Servo signals off now.
+    func limp()
+    /// Tries a trim without storing it: half-degree steps, left then right.
+    func setTrim(_ steps: [Int])
+    /// Stores the trim being tried. Confirmed by a state with `stored` and `saved == trim`.
+    func saveTrim()
 }

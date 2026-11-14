@@ -10,14 +10,14 @@ final class AppModel {
     let live: LiveRobotStore
     let telemetry: TelemetryStore
     let firmware: FirmwareStore
-    let drive: any DriveService
+    let body: BodyStore
 
     init(services: RobotServices) {
         connection = ConnectionStore(service: services.link)
         live = LiveRobotStore(service: services.live)
         telemetry = TelemetryStore(service: services.telemetry)
-        firmware = FirmwareStore(service: services.firmware, calibration: services.calibration)
-        drive = services.drive
+        firmware = FirmwareStore(service: services.firmware)
+        body = BodyStore(service: services.body)
     }
 
     /// Starts consuming every service stream. Safe to call more than once.
@@ -26,5 +26,6 @@ final class AppModel {
         live.start()
         telemetry.start()
         firmware.start()
+        body.start()
     }
 }

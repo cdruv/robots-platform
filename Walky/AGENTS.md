@@ -5,10 +5,11 @@ Personal robotics project: a small two legged robot a Pixel 8 serving as onboard
 - Hardware and physical layout: [HARDWARE.md](HARDWARE.md).
 - Onboard app is native Android: `onboard-android/`.
 - macOS control center for robot: `../Robot Relay/`.
+- Pico firmware: `firmware/pico/`. The phone ⇄ Pico wire protocol is defined only in the module docstring of `firmware/pico/src/body.py`.
 
 ## Architectural Decisions and Rules
 
-- All Android robot work must belong to a single foreground session that stops and releases resources whenever the app loses foreground focus or the display turns off, resuming only while the app is foregrounded and the display is on and unlocked.
+- All Android robot work must belong to a single foreground session that stops and releases resources whenever the app loses foreground focus or the display turns off, resuming only while the app is foregrounded and the display is on and unlocked. The one exception is `PicoWifi`, which keeps an unapproved Wi-Fi request alive across a pause so Android's one-time approval dialog can finish.
 - One executive owns robot state and processes events sequentially on a single
 thread. Edge loops pass events in and targets out; the executive never blocks.
 - A reflex is a named high-rate path from a sense straight to an output,
@@ -21,6 +22,8 @@ without Android. `:app` is the Android implementation.
 - MicroPython on the Pico owns servo command timeout, stop, and watchdogs, and
 must keep that safety behavior if rendering or any cloud link is down.
 The body protocol gives walking and other motions an explicit priority. 
+- Everything on the phone that moves the legs goes through `Legs` (`:core`). A driver holds a pose by calling `drive` steadily; nothing below it resends, so a stalled driver trips the Pico's 500 ms timeout. Do not add resend or keep-alive below `Legs`.
+- The Pico serves one client, the phone, on its own Wi-Fi network; Robot Relay reaches it through the phone. Interrupting the Pico over USB (any `mpremote` call) stops the body link until its next reset.
 - Train deployed policies only on observations the mounted Pixel 8 can produce.
 Record sensor axes and units, phone orientation, observation history,
 action-to-servo mapping, body geometry, and control rate with each policy.

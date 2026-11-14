@@ -32,6 +32,18 @@ struct PicoModeTests {
         #expect(PicoMode.parseModes("mode=test\n").isEmpty)
     }
 
+    @Test func readsTheLinkCredentials() {
+        let output = "mode=\nmodes=center\nlink={\"ssid\": \"Walky-617264\", \"password\": \"0123456789abcdef01234567\"}\r\n"
+        #expect(PicoMode.parseLink(output) == PicoPairing(ssid: "Walky-617264", password: "0123456789abcdef01234567"))
+    }
+
+    @Test func firmwareWithoutTheLinkModuleHasNoCredentials() {
+        #expect(PicoMode.parseLink("mode=\nlink=null\n") == nil)
+        #expect(PicoMode.parseLink("mode=\n") == nil)
+        #expect(PicoMode.parseLink("link={\"ssid\": \"\", \"password\": \"x\"}\n") == nil)
+        #expect(PicoMode.parseLink("link={\"ssid\": \"Walky-1\"}\n") == nil)
+    }
+
     @Test func dropsModesThatCouldNotBeWrittenBack() {
         #expect(PicoMode.parseModes("modes=test, body ,it's,a b,\n") == ["test", "body"])
     }

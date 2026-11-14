@@ -1,32 +1,27 @@
-import json
 import os
-import machine
-from support import fresh, write, read, raises, replace, released, ticket, FilesystemFault
+from support import fresh, write, raises, replace, FilesystemFault
 
 
-def test_rounding_limits_and_pair_validation():
+def test_rounding_and_pair_validation():
     import calibration as cal
-    import servo_output
     assert [cal.trim_us(v) for v in (-18, -1, 0, 1, 18)] == [-99, -6, 0, 6, 99]
-    assert servo_output.pulse_us(1500, -1) == 1494
     for value in ([19, 0], [0], [True, 0], [0.5, 0], None):
         with raises(ValueError):
             cal.validate_steps(value)
-    for nominal, step in ((1502, 18), (1498, -18)):
-        with raises(ValueError):
-            servo_output.pulse_us(nominal, step)
 
 
-def test_storage_missing_saved_corrupt_unknown():
+def test_storage_missing_saved_and_unreadable():
     import calibration as cal
-    assert cal.load() == ((0, 0), False)
+    assert cal.load() == ((0, 0), False, None)
     cal.save((-1, 18))
-    assert cal.load() == ((-1, 18), True)
-    for data in ('{', '{"version":2,"steps":[0,0]}', '{"version":1,"steps":[100,0]}'):
+    assert cal.load() == ((-1, 18), True, None)
+    assert cal.snapshot() == {'version': 1, 'board': '626f617264', 'steps': [-1, 18], 'stored': True}
+    for data in ('{', '{"version":2,"steps":[0,0]}', '{"version":1,"steps":[100,0]}', '[]'):
         write(cal.FILE, data)
-        with raises(ValueError):
-            cal.load()
-        assert 'error' in cal.snapshot()
+        steps, stored, error = cal.load()
+        assert (steps, stored) == ((0, 0), False) and cal.FILE in error
+        snapshot = cal.snapshot()
+        assert snapshot['error'] == error and snapshot['steps'] == [0, 0] and not snapshot['stored']
 
 
 def test_failed_replacement_preserves_last_save():
@@ -35,134 +30,7 @@ def test_failed_replacement_preserves_last_save():
     with replace(cal, 'os', FilesystemFault('rename')):
         with raises(OSError):
             cal.save((4, 5))
-    assert cal.load() == ((2, 3), True)
-
-def test_request_consumed_without_touching_mode():
-    import calibration as cal
-    write('mode.txt', 'once:sweep')
-    cal.arm(ticket())
-    assert cal.consume_request() == ticket()
-    assert cal.consume_request() is None
-    assert read('mode.txt') == 'once:sweep'
-    write(cal.REQUEST_FILE, '{')
-    with raises(ValueError):
-        cal.consume_request()
-    assert cal.REQUEST_FILE not in os.listdir()
-
-
-def message(command, id=0, **kwargs):
-    request = ticket()
-    return dict(version=1, board=request['board'], session=request['session'],
-                id=id, command=command, **kwargs)
-
-
-def protocol():
-    import calibration_session
-    from servo_output import Servos
-    servos = Servos((0, 0))
-    return calibration_session.Session(ticket(), servos), servos
-
-
-def test_preview_is_atomic_volatile_and_save_persists():
-    import calibration as cal
-    session, servos = protocol()
-    session.handle(message('hello'))
-    reply = session.handle(message('preview', 1, steps=[-1, 18]))
-    assert reply['pulses'] == [1494, 1599]
-    assert cal.load() == ((0, 0), False)
-    previous = list(machine.pulses)
-    with raises(ValueError):
-        session.handle(message('preview', 2, steps=[0, 19]))
-    assert machine.pulses == previous
-    assert servos.steps == (-1, 18)
-    reply = session.handle(message('save', 3))
-    assert reply['finished']
-    assert all(output.stopped for output in machine.outputs)
-    assert cal.load() == ((-1, 18), True)
-
-
-def test_nudge_moves_one_leg_and_returns_to_trimmed_centre():
-    session, _ = protocol()
-    session.handle(message('hello'))
-    session.handle(message('preview', 1, steps=[2, -18]))
-    before = len(machine.pulses)
-    session.handle(message('nudge', 2, side=0))
-    assert machine.pulses[before:] == [(0, 1600000), (0, 1511000)]
-    before = len(machine.pulses)
-    reply = session.handle(message('nudge', 3, side=1))
-    assert machine.pulses[before:] == [(1, 1402000), (1, 1401000)]
-    assert reply['preview'] == [2, -18] and not reply['finished']
-    previous = list(machine.pulses)
-    for request_id, side in ((4, 2), (5, True), (6, None)):
-        with raises(ValueError):
-            session.handle(message('nudge', request_id, side=side))
-    assert machine.pulses == previous
-
-
-def test_cancel_discards_preview():
-    import calibration as cal
-    session, _ = protocol()
-    session.handle(message('hello'))
-    session.handle(message('preview', 1, steps=[3, 4]))
-    session.handle(message('cancel', 2))
-    assert all(output.stopped for output in machine.outputs)
-    assert cal.load() == ((0, 0), False)
-
-
-def test_handshake_identity_replay_unknown_commands():
-    for request in (message('preview', steps=[0, 0]), [],
-                    dict(message('hello'), session='wrong'), message('drive')):
-        session, _ = protocol()
-        with raises(ValueError):
-            session.handle(request)
-    session, _ = protocol()
-    session.handle(message('hello'))
-    with raises(ValueError):
-        session.handle(message('heartbeat'))
-    with raises(ValueError):
-        session.handle(message('drive', 1))
-
-
-def test_deadlines():
-    from calibration_session import timeout_reason
-    assert not timeout_reason(59999, 0, 0, False)
-    assert timeout_reason(60000, 0, 0, False) == 'waiting for client'
-    assert not timeout_reason(4999, 0, 0, True)
-    assert timeout_reason(5000, 0, 0, True) == 'client idle'
-    assert timeout_reason(600000, 0, 599999, True) == 'session limit'
-
-
-def test_network_cleanup_on_cancel_disconnect_malformed_and_timeout():
-    import network
-    import socket
-    hello = (json.dumps(message('hello')) + '\n').encode()
-    cancel = (json.dumps(message('cancel', 1)) + '\n').encode()
-    cases = (([hello, cancel], False, None), ([hello, b''], False, OSError),
-             ([b'{bad\n'], False, ValueError), ([b'x' * 1025], False, ValueError),
-             ([hello], False, OSError), ([], True, OSError))
-    for messages, no_client, error in cases:
-        clock = fresh()
-        import calibration_session
-        network.WLAN.active_interfaces = {}
-        socket.messages = list(messages)
-        socket.no_client, socket.closed, socket.replies = no_client, False, b''
-        if error is None:
-            calibration_session.run(ticket())
-            assert b'"finished": true' in socket.replies
-        else:
-            with raises(error):
-                calibration_session.run(ticket())
-        released()
-        assert socket.closed
-        assert network.WLAN.active_interfaces == {network.WLAN.IF_STA: False, network.WLAN.IF_AP: False}
-        if no_client:
-            assert clock.now == 63000
-        log = read('boot.log')
-        assert 'access point Walky-Cal-' in log and 'interference mode 3' in log and 'ifconfig' in log
-        assert ('Traceback' in log) == (error is not None)
-        if messages == [hello]:
-            assert 'client idle' in log and 'idle_ms=5000 last=hello id=0' in log and 'ap_active=True stations=1' in log
-        assert ticket()['password'] not in log
+    assert cal.load() == ((2, 3), True, None)
 
 
 def test_boot_log_rotates_and_never_raises():

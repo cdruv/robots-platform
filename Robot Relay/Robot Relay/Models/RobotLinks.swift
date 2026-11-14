@@ -40,6 +40,8 @@ nonisolated struct PicoLink: Equatable, Sendable {
     var route: Route?
     /// The serial port on the USB route, for example `/dev/cu.usbmodem1101`.
     var port: String?
+    /// On the phone route: whether the servo signals are on.
+    var bodyMode: PicoBodyState.Mode?
     /// nil: not read yet, or the port was busy.
     var arm: PicoArm?
     /// The requests the firmware on the board accepts (`modes.MODES`), in its order.

@@ -107,12 +107,14 @@ fun DebugToggle(active: Boolean, onClick: () -> Unit, modifier: Modifier = Modif
     }
 }
 
-/** Hearing status, the IMU reflex feed, telemetry stream status, and the most recent telemetry events. */
+/** Hearing status, the IMU reflex feed, the Pico link, telemetry stream status, and the most recent telemetry events. */
 @Composable
 fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier) {
     val hearing by runtime.hearing.status.collectAsStateWithLifecycle()
     val body by runtime.faceMotionReflex.bodyMotion.collectAsStateWithLifecycle()
     val server by runtime.telemetryServer.status.collectAsStateWithLifecycle()
+    val link by runtime.legs.state.collectAsStateWithLifecycle()
+    val picoWifi by runtime.picoWifi.status.collectAsStateWithLifecycle()
     val events by runtime.recentEvents.events.collectAsStateWithLifecycle()
     var showPartial by rememberSaveable { mutableStateOf(false) }
     var showMotion by rememberSaveable { mutableStateOf(true) }
@@ -199,6 +201,25 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
                 "imu → face (reflex, no executive)  roll %.0f°  pitch %.0f°  accel %.1f"
                     .format(Locale.US, body.rollDegrees, body.pitchDegrees, body.accelMagnitude),
                 style = Mono.copy(color = Dim),
+            )
+            val pico = link.pico
+            BasicText(
+                buildString {
+                    append("pico ${runtime.bodyPhase(link, picoWifi)}")
+                    if (pico == null) {
+                        runtime.picoWifi.ssid?.let { append("  $it") }
+                    } else {
+                        link.rttMs?.let { append("  rtt $it ms") }
+                        append("  ${pico.mode.name.lowercase()}  trim ${pico.trim.joinToString("/")}")
+                        if (!pico.stored) append(" (not calibrated)")
+                        pico.error?.let { append("  error: ${it.msg}") }
+                    }
+                },
+                style = Mono.copy(color = when {
+                    pico?.error != null -> Red
+                    pico != null -> Green
+                    else -> Dim
+                }),
             )
             BasicText(
                 buildString {

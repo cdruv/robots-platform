@@ -3,9 +3,10 @@ PWRON_RESET = 1
 
 
 def clear():
-    global pulses, outputs, pins, resets, cause, interrupt
+    global pulses, outputs, pins, resets, cause, interrupt, watchdogs, feeds
     pulses, outputs, pins = [], [], {}
     resets, cause, interrupt = 0, PWRON_RESET, False
+    watchdogs = feeds = 0
 
 
 clear()
@@ -28,6 +29,9 @@ class Pin:
     def off(self):
         pins[self.number] = 0
 
+    def value(self, level):
+        pins[self.number] = 1 if level else 0
+
 
 class PWM:
     def __init__(self, pin, freq, duty_u16):
@@ -46,10 +50,13 @@ class PWM:
 
 class WDT:
     def __init__(self, timeout):
+        global watchdogs
         assert timeout == 2000
+        watchdogs += 1
 
     def feed(self):
-        pass
+        global feeds
+        feeds += 1
 
 
 def unique_id():

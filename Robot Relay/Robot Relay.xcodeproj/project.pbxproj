@@ -333,9 +333,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connects to the robot phone and temporary Pico calibration network.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Reads Wi-Fi network names to connect calibration and restore your network.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Switches Mac Wi-Fi to the robot for calibration, then restores your network.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connects to the robot phone.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -368,9 +366,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connects to the robot phone and temporary Pico calibration network.";
-				INFOPLIST_KEY_NSLocationUsageDescription = "Reads Wi-Fi network names to connect calibration and restore your network.";
-				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "Switches Mac Wi-Fi to the robot for calibration, then restores your network.";
+				INFOPLIST_KEY_NSLocalNetworkUsageDescription = "Connects to the robot phone.";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

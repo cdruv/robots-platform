@@ -4,13 +4,14 @@ import kotlinx.serialization.Serializable
 
 /**
  * Everything the robot can express or actuate. All calls must return quickly;
- * implementations do their own work off the caller's thread. Locomotion joins here later.
+ * implementations do their own work off the caller's thread.
  */
 data class Output(
     val face: Face,
     val voice: Voice,
     val haptics: Haptics,
     val sounds: Sounds,
+    val legs: Legs,
 )
 
 /**

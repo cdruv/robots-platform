@@ -8,7 +8,7 @@ if sys.implementation.name != 'micropython' or sys.implementation.version[:3] !=
 from support import fresh
 
 passed = failed = 0
-for module_name in ('test_firmware', 'test_calibration'):
+for module_name in ('test_firmware', 'test_calibration', 'test_link', 'test_body'):
     module = __import__(module_name)
     for name in sorted(dir(module)):
         if not name.startswith('test_'):

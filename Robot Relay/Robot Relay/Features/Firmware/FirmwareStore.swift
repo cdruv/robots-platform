@@ -10,17 +10,11 @@ final class FirmwareStore {
 
     private(set) var consoleLines: [ConsoleLine] = []
 
-    let calibration: CalibrationController?
-
     private let service: any FirmwareService
     private var tasks: [Task<Void, Never>] = []
 
-    init(service: any FirmwareService, calibration: CalibrationController? = nil) {
-        self.calibration = calibration
+    init(service: any FirmwareService) {
         self.service = service
-        calibration?.log = { [weak self] text in
-            self?.consoleLines.append(ConsoleLine(text: text, kind: .output))
-        }
     }
 
     func start() {
@@ -39,7 +33,7 @@ final class FirmwareStore {
 
     var hasDevice: Bool { state.hasDevice }
 
-    var canUpload: Bool { hasDevice && calibration?.blocksUSB != true && !state.isBusy && !state.filesToUpload.isEmpty }
+    var canUpload: Bool { hasDevice && !state.isBusy && !state.filesToUpload.isEmpty }
 
     /// What `mode.txt` holds now: a mode, or "" for none. nil until read.
     var currentBoot: String? {
@@ -94,7 +88,7 @@ final class FirmwareStore {
     }
 
     var canApplyBoot: Bool {
-        hasDevice && calibration?.blocksUSB != true && !state.isBusy && !state.modes.isEmpty && currentBoot != nil && selectedRequest != currentBoot
+        hasDevice && !state.isBusy && !state.modes.isEmpty && currentBoot != nil && selectedRequest != currentBoot
     }
 
     func refreshLocal() {

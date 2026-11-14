@@ -21,26 +21,8 @@ final class PicoUSBLink {
     private var observers: [(PicoLink) -> Void] = []
     /// Bumped on every plug and unplug, so a slow mpremote result can't land on a different board.
     private var generation = 0
-    private(set) var calibrationReserved = false
-
-    /// Reserve before waiting: queued reads and retries become no-ops.
-    func reserveForCalibration() async -> String? {
-        guard !calibrationReserved else { return nil }
-        calibrationReserved = true
-        Logger.pico.info("Pico USB reserved for calibration, reads, uploads and mode changes paused")
-        observers.forEach { $0(current) }
-        generation += 1
-        await tail?.value
-        return current.port
-    }
-
-    func releaseCalibration() {
-        calibrationReserved = false
-        Logger.pico.info("Pico USB released\(self.current.port == nil ? ", board is re-read on next plug" : ", re-reading board", privacy: .public)")
-        observers.forEach { $0(current) }
-        // The session is over on the Mac side, so a read can't disturb it.
-        refresh()
-    }
+    /// Receives the board's Wi-Fi credentials each time a read finds them.
+    var onPairing: ((PicoPairing) -> Void)?
     /// mpremote calls run one at a time; two would fight over the port.
     private var tail: Task<Void, Never>?
     /// Waits before re-reading after a failed read, then gives up until the next plug or Refresh.
@@ -65,7 +47,7 @@ final class PicoUSBLink {
 
     /// Reads the board again, with the same retries as on connect. Does nothing without a Pico on USB.
     func refresh() {
-        guard !calibrationReserved, current.port != nil else { return }
+        guard current.port != nil else { return }
         generation += 1  // Drops retries still pending from an earlier read.
         readOnConnect(attempt: 0)
     }
@@ -74,7 +56,7 @@ final class PicoUSBLink {
     /// again, reporting that read to `reporter`. Does nothing without a Pico on USB.
     func withBoard(reportingTo reporter: CommandRunner, _ work: @escaping (String) async -> Void) async {
         await enqueue { [weak self] in
-            guard let self, !self.calibrationReserved, let port = current.port else { return }
+            guard let self, let port = current.port else { return }
             let generation = generation
             await work(port)
             guard generation == self.generation else { return }
@@ -101,7 +83,7 @@ final class PicoUSBLink {
 
     private func readOnConnect(attempt: Int) {
         enqueue { [weak self] in
-            guard let self, !self.calibrationReserved else { return }
+            guard let self else { return }
             let generation = generation
             guard await !read(using: runner) else { return }
             let port = current.port ?? "?"
@@ -124,7 +106,7 @@ final class PicoUSBLink {
     /// False when the mode couldn't be read.
     @discardableResult
     private func read(using reporter: CommandRunner) async -> Bool {
-        guard !calibrationReserved, let port = current.port else { return false }
+        guard let port = current.port else { return false }
         let generation = generation
         var output = ""
         await reporter.run("mpremote", ["connect", port, "exec", PicoMode.readScript]) { result in
@@ -149,6 +131,7 @@ final class PicoUSBLink {
         link.calibration = PicoMode.parseCalibration(output)
         link.bootLog = PicoMode.parseBootLog(output)
         current = link
+        if let pairing = PicoMode.parseLink(output) { onPairing?(pairing) }
         return link.arm != nil
     }
 
@@ -172,10 +155,12 @@ nonisolated enum PicoMode {
     static let module = "modes"
 
     /// Prints, one per line: `board=machine|release`, `file=name,bytes,sha256` for each `.py`
-    /// file, `mode=` and the file's contents (nothing when there is no file), then `modes=` and
-    /// the firmware's `MODES`, comma-separated (nothing when the board has no such module).
-    /// `modes` goes last: importing a broken module fails the call, after the rest is printed.
-    /// Importing it touches no hardware.
+    /// file, `mode=` and the file's contents (nothing when there is no file), `calibration=`
+    /// as JSON, then `modes=` and the firmware's `MODES`, comma-separated, and `link=` as JSON
+    /// (each nothing or `null` when the board has no such module).
+    /// `modes` and `link` go last: importing a broken module fails the call, after the rest
+    /// is printed. Importing them touches no hardware; `link.credentials()` creates the
+    /// board's Wi-Fi name and password on first use and never starts the radio.
     static let readScript =
         "import os, hashlib, binascii; f = os.listdir(); u = os.uname(); "
         + "print('board=' + u.machine + '|' + u.release); "
@@ -183,7 +168,8 @@ nonisolated enum PicoMode {
         + "print('mode=' + (open('\(file)').read().strip() if '\(file)' in f else '')); "
         + "print('calibration=' + (__import__('json').dumps(__import__('calibration').snapshot()) if 'calibration.py' in f else 'null')); "
         + "[print('log=' + l) for n in ('boot.log.1', 'boot.log') if n in f for l in open(n).read().split('\\n') if l]; "
-        + "print('modes=' + (','.join(__import__('\(module)').MODES) if '\(module).py' in f else ''))"
+        + "print('modes=' + (','.join(__import__('\(module)').MODES) if '\(module).py' in f else '')); "
+        + "print('link=' + (__import__('json').dumps(__import__('link').credentials()) if 'link.py' in f else 'null'))"
 
     /// The `log=` lines of `readScript`'s output: the firmware's `boot.log`, oldest first.
     static func parseBootLog(_ output: String) -> [String] {
@@ -200,6 +186,14 @@ nonisolated enum PicoMode {
             Logger.pico.error("calibration snapshot present but undecodable: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    /// The `link=` line: the Pico's own Wi-Fi network, which the phone joins.
+    static func parseLink(_ output: String) -> PicoPairing? {
+        guard let raw = value(of: "link", in: output), let data = raw.data(using: .utf8),
+              let pairing = try? JSONDecoder().decode(PicoPairing.self, from: data),
+              !pairing.ssid.isEmpty, !pairing.password.isEmpty else { return nil }
+        return pairing
     }
 
     /// Deletes the file if it exists.

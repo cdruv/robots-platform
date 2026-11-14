@@ -40,6 +40,12 @@ import com.vadymsidorov.walky.face.FaceRenderer
 private val FaceBackground = Color(0xFF0D0712)
 private val OverlayFade = tween<Float>(240)
 
+/** Runtime permissions and what each one enables. */
+private val PERMISSIONS = mapOf(
+    Manifest.permission.RECORD_AUDIO to "hearing",
+    Manifest.permission.ACCESS_LOCAL_NETWORK to "the Pico link",
+)
+
 /**
  * Full-screen face with a small corner button that toggles the debug overlay. Senses run
  * only while resumed, focused, unlocked, and on an active display.
@@ -64,11 +70,15 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private val requestMicrophone = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) {
+    private val requestPermissions = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        results.filterValues { !it }.keys.forEach {
+            runtime.telemetry.logger("activity").warn("${it.substringAfterLast('.')} denied; ${PERMISSIONS[it]} stays off")
+        }
+        // A new session picks up what was just granted.
+        if (results.containsValue(true)) {
             setRobotActive(false)
             updateForeground()
-        } else runtime.telemetry.logger("activity").warn("RECORD_AUDIO denied; hearing stays off")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -110,9 +120,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            requestMicrophone.launch(Manifest.permission.RECORD_AUDIO)
-        }
+        val missing = PERMISSIONS.keys.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty()) requestPermissions.launch(missing.toTypedArray())
     }
 
     override fun onResume() {

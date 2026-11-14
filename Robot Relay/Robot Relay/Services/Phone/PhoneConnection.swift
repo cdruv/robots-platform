@@ -4,8 +4,10 @@ import os
 
 /// The TCP link to onboard-android's telemetry server (`TcpServerSink`, NDJSON on :7777).
 ///
-/// Reconnects every 3 s while the user wants to be connected, and gives up after
-/// `maxAttempts` attempts in a row (the first plus 3 retries) end without a hello. Each
+/// Reconnects every 3 s while the user wants to be connected. It gives up only after
+/// `maxUSBAttempts` USB setups in a row fail (no phone on USB). Once the tunnel opens it keeps
+/// retrying: the phone is attached, and its app may stay paused for a while, for example
+/// behind Android's Wi-Fi approval dialog that the pairing sent on hello brings up. Each
 /// connection starts with a hello line and a replay of recent events; replayed events already
 /// seen in the same session are skipped, so the event stream has no duplicates.
 final class PhoneConnection {
@@ -16,15 +18,26 @@ final class PhoneConnection {
         var eventsPerSecond = 0
         /// Telemetry lines the phone dropped for slow TCP clients this session.
         var dropped = 0
+        /// The phone's link to the Pico, without the parts that change with every report.
+        var body: Body?
+    }
+
+    struct Body: Equatable {
+        var phase: String
+        var mode: PicoBodyState.Mode?
     }
 
     static let port: UInt16 = 7777
     static let pingInterval: Duration = .seconds(2)
-    static let backoff: [Duration] = [.seconds(3)]
-    static let maxAttempts = 4
+    static let retryInterval: Duration = .seconds(3)
+    static let maxUSBAttempts = 4
 
     var onStatus: ((Status) -> Void)?
     var onActivity: ((LinkActivity) -> Void)?
+    /// Called for every hello, including the one after a reconnect in the same session.
+    var onHello: (() -> Void)?
+    /// Every body report from the phone, and nil when the connection to the phone ends.
+    var onBody: ((BodyLink?) -> Void)?
 
     private(set) var status = Status() {
         didSet { if status != oldValue { onStatus?(status) } }
@@ -37,7 +50,7 @@ final class PhoneConnection {
     /// Bumped for every new `NWConnection`, so late callbacks from an old one are ignored.
     private var generation = 0
     private var wantsConnection = false
-    private var failures = 0
+    private var usbFailures = 0
     private var retryTask: Task<Void, Never>?
     private var tickTask: Task<Void, Never>?
 
@@ -65,14 +78,14 @@ final class PhoneConnection {
         guard !wantsConnection else { return }
         self.prepareUSB = prepareUSB
         wantsConnection = true
-        failures = 0
+        usbFailures = 0
         startAttempt()
     }
 
     private func startAttempt() {
         status.state = .connecting
         status.hello = nil
-        report("Connecting to Walky over USB", .ok("attempt \(failures + 1) of \(Self.maxAttempts)"))
+        report("Connecting to Walky over USB", .running)
         setupTask = Task {
             guard !Task.isCancelled, let prepareUSB else { return }
             let ready = await prepareUSB()
@@ -99,6 +112,7 @@ final class PhoneConnection {
         status.state = .disconnected
         status.rttMs = nil
         status.eventsPerSecond = 0
+        endBody()
         if wasActive {
             Logger.phone.notice("phone: disconnected by user")
             report("USB connection", .ok("disconnected by user"))
@@ -110,7 +124,10 @@ final class PhoneConnection {
         let port = NWEndpoint.Port(rawValue: Self.port)!
         generation += 1
         let current = generation
-        let connection = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
+        let tcp = NWProtocolTCP.Options()
+        // Leg targets are small lines that must not wait for earlier ones to be acknowledged.
+        tcp.noDelay = true
+        let connection = NWConnection(host: "127.0.0.1", port: port, using: NWParameters(tls: nil, tcp: tcp))
         self.connection = connection
         framer = LineFramer()
         sawHello = false
@@ -169,16 +186,19 @@ final class PhoneConnection {
         tickTask = nil
         status.rttMs = nil
         status.eventsPerSecond = 0
+        endBody()
         guard wantsConnection else { return }
-        failures += 1
-        guard let delay = Self.retryDelay(afterFailures: failures) else {
-            Logger.phone.error("phone: attempt \(self.failures, privacy: .public) of \(Self.maxAttempts, privacy: .public) failed: \(reason, privacy: .public), giving up")
+        // `stage` is set only when USB setup failed; any other failure had the tunnel open.
+        usbFailures = stage == nil ? 0 : usbFailures + 1
+        guard usbFailures < Self.maxUSBAttempts else {
+            Logger.phone.error("phone: USB setup failed \(self.usbFailures, privacy: .public) times in a row: \(reason, privacy: .public), giving up")
             wantsConnection = false
             status.state = .disconnected
-            report(stage ?? connectText, .failed("\(reason) · gave up after \(Self.maxAttempts) attempts"))
+            report(stage ?? connectText, .failed("\(reason) · gave up after \(Self.maxUSBAttempts) attempts"))
             return
         }
-        Logger.phone.notice("phone: attempt \(self.failures, privacy: .public) of \(Self.maxAttempts, privacy: .public) failed: \(reason, privacy: .public), retrying in \(delay.components.seconds, privacy: .public) s")
+        let delay = Self.retryInterval
+        Logger.phone.notice("phone: connection failed: \(reason, privacy: .public), retrying in \(delay.components.seconds, privacy: .public) s")
         status.state = .retrying(Date.now.addingTimeInterval(Double(delay.components.seconds)))
         report(stage ?? connectText, .failed("\(reason) · retry in \(delay.components.seconds) s"))
         retryTask?.cancel()
@@ -189,10 +209,18 @@ final class PhoneConnection {
         }
     }
 
-    /// The wait before the next attempt after `failures` attempts in a row, or nil to give up.
-    static func retryDelay(afterFailures failures: Int) -> Duration? {
-        guard failures < maxAttempts else { return nil }
-        return backoff[min(failures - 1, backoff.count - 1)]
+    private func endBody() {
+        guard status.body != nil else { return }
+        status.body = nil
+        onBody?(nil)
+    }
+
+    /// Sends one line to the phone. Dropped unless the phone has said hello.
+    func send(_ line: Data) {
+        guard let connection, status.state == .connected else { return }
+        connection.send(content: line + Data([0x0A]), completion: .contentProcessed { error in
+            if let error { Logger.phone.error("phone: send failed: \(error.localizedDescription, privacy: .public)") }
+        })
     }
 
     private func closeConnection() {
@@ -210,7 +238,6 @@ final class PhoneConnection {
         case .hello(let hello):
             status.state = .connected
             sawHello = true
-            failures = 0
             if dedupe.begin(session: hello.session) {
                 status.dropped = 0
                 Logger.phone.info("phone: hello from \(hello.summary, privacy: .public), new session, telemetry restarts")
@@ -219,6 +246,7 @@ final class PhoneConnection {
             }
             status.hello = hello
             report("Walky connected · hello \(hello.summary)", .ok(nil))
+            onHello?()
         case .pong(let ping):
             guard let sent = pingsInFlight.removeValue(forKey: ping) else { return }
             let elapsed = ContinuousClock.now - sent
@@ -234,6 +262,9 @@ final class PhoneConnection {
             eventsThisSecond += 1
             if let dropped = event.tcpDropped { status.dropped += dropped }
             eventSink.yield(event)
+        case .body(let link):
+            status.body = Body(phase: link.phase, mode: link.pico?.mode)
+            onBody?(link)
         case .otherLink:
             break
         case nil:
@@ -305,6 +336,7 @@ nonisolated enum PhoneLine: Equatable, Sendable {
     case hello(PhoneHello)
     case pong(Int64)
     case event(TelemetryEvent)
+    case body(BodyLink)
     case otherLink(String)
 
     private struct Probe: Decodable {
@@ -319,6 +351,7 @@ nonisolated enum PhoneLine: Equatable, Sendable {
         switch probe.link {
         case "hello": return (try? decoder.decode(PhoneHello.self, from: line)).map(PhoneLine.hello)
         case "pong": return probe.ping.map(PhoneLine.pong)
+        case "body": return (try? decoder.decode(BodyLink.self, from: line)).map(PhoneLine.body)
         case let link?: return .otherLink(link)
         case nil: return (try? decoder.decode(TelemetryEvent.self, from: line)).map(PhoneLine.event)
         }

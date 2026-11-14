@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 import AppKit
 import os
 
-/// Firmware files, power-on mode and leg offsets on the left; the commands run on the right.
+/// Firmware files, power-on mode and the stored leg trim on the left; the commands run on the right.
 struct FirmwareView: View {
     @Environment(AppModel.self) private var app
 
@@ -15,7 +15,7 @@ struct FirmwareView: View {
             HStack(alignment: .top, spacing: 14) {
                 ScrollView {
                   VStack(spacing: 12) {
-                    if !state.hasDevice && store.calibration?.blocksUSB != true { USBRequiredCard() }
+                    if !state.hasDevice { USBRequiredCard() }
                     FirmwareFilesCard(store: store)
                     PowerOnModeCard(store: store)
                     LegOffsetsCard(store: store)
@@ -42,7 +42,6 @@ struct FirmwareView: View {
     }
 }
 
-/// USB prepares calibration; live adjustments use a temporary Wi-Fi session.
 private struct USBRequiredCard: View {
     var body: some View {
         Card {
@@ -53,8 +52,8 @@ private struct USBRequiredCard: View {
                     .foregroundStyle(Nocturne.accent300)
             }
             Text("""
-                Connect the Pico 2 W with a USB data cable. Uploading, the power-on mode and \
-                calibration preparation use USB. Live leg calibration temporarily switches Mac Wi-Fi to the Pico.
+                Connect the Pico 2 W with a USB data cable to upload firmware or change the power-on \
+                mode. Plugging it in stops its link to the phone until the next power-on.
                 """)
                 .font(.nocturne(11.5))
                 .foregroundStyle(Nocturne.neutral500)
@@ -64,7 +63,7 @@ private struct USBRequiredCard: View {
     }
 }
 
-private struct CardHeader: View {
+struct CardHeader: View {
     let title: String
     var note: String?
     let status: String
@@ -234,89 +233,32 @@ struct PowerOnModeCard: View {
     }
 }
 
+/// The trim stored on the board, as read over USB. It is changed in the Drive tab.
 struct LegOffsetsCard: View {
-    @Bindable var store: FirmwareStore
+    let store: FirmwareStore
 
     var body: some View {
+        let snapshot = store.state.calibration
         Card {
-            CardHeader(title: "Leg calibration", note: "approximate ° · ±9", status: store.calibration?.phase.rawValue ?? "unavailable")
-            let snapshot = store.state.calibration
+            CardHeader(
+                title: "Leg calibration", note: "° · ±9",
+                status: !store.hasDevice ? "needs USB" : snapshot?.stored == true ? "calibrated" : "not calibrated"
+            )
             if let error = snapshot?.error {
-                Text("Stored calibration error: " + error).foregroundStyle(Nocturne.Log.error)
+                Text("Stored calibration ignored: " + error).foregroundStyle(Nocturne.Log.error)
             }
-            if let stored = snapshot?.offsets, store.hasDevice {
-                Text("USB stored: L \(Fmt.signed(stored.left))° · R \(Fmt.signed(stored.right))° · \(snapshot?.stored == true ? "calibrated" : "not calibrated")")
-                    .font(.nocturneMono(11))
+            if store.hasDevice, let stored = snapshot?.offsets {
+                Text("L \(Fmt.signed(stored.left))° · R \(Fmt.signed(stored.right))°")
+                    .font(.nocturneMono(11.5))
+                    .foregroundStyle(Nocturne.neutral200)
+            } else if store.hasDevice {
+                Text("Upload firmware to read the stored trim.")
             }
-            if let calibration = store.calibration {
-                CalibrationControls(controller: calibration, usbConnected: store.hasDevice, canPrepare: store.hasDevice && !store.state.isBusy && snapshot?.supported == true,
-                                    prepare: { calibration.prepare(snapshot: snapshot) })
-            }
-            if store.hasDevice && snapshot == nil {
-                Text("Upload firmware to enable calibration.")
-            }
+            Text("Read from the board over USB. Calibrate in the Drive tab, with the robot on battery.")
+                .fixedSize(horizontal: false, vertical: true)
         }
         .font(.nocturne(11.5))
         .foregroundStyle(Nocturne.neutral500)
-    }
-}
-
-private struct CalibrationControls: View {
-    @Bindable var controller: CalibrationController
-    let usbConnected: Bool
-    let canPrepare: Bool
-    let prepare: () -> Void
-
-    var body: some View {
-        Text("Calibration temporarily switches Mac Wi-Fi to the robot and disconnects afterwards. Internet and phone telemetry may be interrupted.")
-            .fixedSize(horizontal: false, vertical: true)
-        if !controller.message.isEmpty {
-            Text(controller.message)
-                .foregroundStyle(controller.phase == .error ? Nocturne.Log.error : Nocturne.neutral300)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        if let recovery = controller.recovery {
-            Text(recovery).foregroundStyle(Nocturne.accent300)
-            Button("Open Wi-Fi Settings") {
-                NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.wifi-settings-extension")!)
-            }.buttonStyle(.nocturneSecondary)
-        }
-        if controller.phase == .adjusting || controller.phase == .saving {
-            Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 6) {
-                ForEach(LegSide.allCases, id: \.self) { side in
-                    GridRow {
-                        Text(side.label + " · " + side.pin)
-                        OffsetStepper(value: $controller.offsets[side], step: LegOffsets.step, range: LegOffsets.range)
-                        let index = side == .left ? 0 : 1
-                        Text(controller.pulses.indices.contains(index) ? "\(controller.pulses[index]) µs applied" : "awaiting reply")
-                        Button("Wiggle") { controller.nudge(side) }.buttonStyle(.nocturneGhost)
-                    }
-                }
-            }
-            .disabled(controller.phase != .adjusting)
-            if let saved = controller.saved {
-                Text("Saved: L \(Fmt.signed(saved.left))° · R \(Fmt.signed(saved.right))°" + (controller.isStored ? "" : " · not calibrated"))
-            }
-            Text(controller.offsets != controller.applied ? "Preview pending acknowledgement" : "Preview applied; Save & finish persists both offsets.")
-        }
-        HStack {
-            if !controller.blocksUSB {
-                Button("Prepare calibration", action: prepare)
-                    .buttonStyle(.nocturnePrimary).disabled(!canPrepare)
-            }
-            if controller.phase == .awaitingBoot {
-                Button("Connect over Wi-Fi") { controller.connect() }
-                    .buttonStyle(.nocturnePrimary).disabled(usbConnected)
-            }
-            if controller.phase == .adjusting {
-                Button("Save & finish") { controller.saveAndFinish() }.buttonStyle(.nocturnePrimary)
-            }
-            if controller.blocksUSB {
-                Button("Cancel & disconnect") { controller.cancel() }
-                    .buttonStyle(.nocturneSecondary)
-                    .disabled(controller.phase == .saving || controller.phase == .finishing)
-            }
-        }
     }
 }
 
@@ -324,7 +266,7 @@ struct FirmwareConsole: View {
     let store: FirmwareStore
 
     var body: some View {
-        Tile(caption: "Console", value: "USB · calibration Wi-Fi") {
+        Tile(caption: "Console", value: "USB") {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {

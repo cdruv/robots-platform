@@ -1,9 +1,12 @@
+import json
 import os
 import sys
 import time
 import machine
+import network
+import socket
 
-MODULES = ('main', 'bootlog', 'modes', 'servo_check', 'body', 'calibration', 'servo_output', 'calibration_session')
+MODULES = ('main', 'bootlog', 'modes', 'servo_check', 'body', 'link', 'calibration', 'servo_output')
 
 
 class Clock:
@@ -21,6 +24,8 @@ class Clock:
 
     def sleep_ms(self, duration):
         self.now = self.ticks_add(self.now, duration)
+        # A loop that a test forgot to end must fail, not hang the suite.
+        assert self.now < 3600000, 'fake clock ran for an hour'
 
 
 def fresh():
@@ -30,11 +35,13 @@ def fresh():
     for name in MODULES:
         sys.modules.pop(name, None)
     machine.clear()
+    socket.clear()
+    network.WLAN.active_interfaces = {}
     clock = Clock()
     import servo_check
-    import calibration_session
+    import body
     servo_check.time = clock
-    calibration_session.time = clock
+    body.time = clock
     return clock
 
 
@@ -84,9 +91,8 @@ def released():
     assert machine.resets == 1
 
 
-def ticket():
-    return dict(version=1, board='626f617264', session='a' * 32,
-                password='b' * 32, ssid='Walky-Cal-test')
+def line(**message):
+    return (json.dumps(message) + '\n').encode()
 
 
 class FilesystemFault:

@@ -6,6 +6,11 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Telemetry: the app serves JSON lines over TCP to the workstation. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Body link: the phone joins the Pico's own Wi-Fi network as a second, local-only connection. -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Asked for at runtime. Without it, TCP connects to the Pico time out. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
 
     <!-- Lets SpeechRecognizer resolve the recognition service on API 30+. -->
     <queries>

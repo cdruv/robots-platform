@@ -51,9 +51,4 @@ struct PhoneConnectionTests {
         connection.handle(line: Data("not json".utf8))
         #expect(connection.status == PhoneConnection.Status())
     }
-
-    @Test func retriesEvery3SecondsThenGivesUpAfter4Attempts() {
-        #expect((1..<PhoneConnection.maxAttempts).map(PhoneConnection.retryDelay(afterFailures:)) == [.seconds(3), .seconds(3), .seconds(3)])
-        #expect(PhoneConnection.retryDelay(afterFailures: PhoneConnection.maxAttempts) == nil)
-    }
 }

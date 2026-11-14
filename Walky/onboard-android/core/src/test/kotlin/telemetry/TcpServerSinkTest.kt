@@ -157,6 +157,39 @@ class TcpServerSinkTest {
     }
 
     @Test
+    fun otherClientLinesGoToOnLineAndSendReachesOnlyConnectedClients() {
+        val received = java.util.concurrent.LinkedBlockingQueue<JsonObject>()
+        val sink = TcpServerSink(port = 0, onLine = { received += it })
+        try {
+            sink.start()
+            val port = sink.status.value.port!!
+            val (socket, reader) = connectPastHello(port)
+            socket.use {
+                awaitClients(sink, 1)
+                socket.send("""{"ping":1}""")
+                socket.send("""{"link":"body","legs":[1,2]}""")
+                socket.send("[1,2]")
+                assertEquals("pong", json(reader.readLine())["link"]?.jsonPrimitive?.content)
+                assertEquals(json("""{"link":"body","legs":[1,2]}"""), received.poll(5, java.util.concurrent.TimeUnit.SECONDS))
+
+                sink.send(buildJsonObject { put("link", "body"); put("phase", "connected") })
+                assertEquals(json("""{"link":"body","phase":"connected"}"""), json(reader.readLine()))
+            }
+            // A later client gets the hello and the telemetry replay, not the line sent before it connected.
+            sink.write(listOf(event(1)))
+            val (later, laterReader) = connectPastHello(port)
+            later.use {
+                assertEquals(event(1), WalkyJson.decodeFromString(TelemetryEvent.serializer(), laterReader.readLine()))
+                later.soTimeout = 200
+                assertTrue(runCatching { laterReader.readLine() }.exceptionOrNull() is SocketTimeoutException)
+            }
+            assertEquals(null, received.poll())
+        } finally {
+            sink.close()
+        }
+    }
+
+    @Test
     fun junkAndOversizedInputIsIgnoredAndTheClientStaysConnected() {
         val sink = TcpServerSink(port = 0)
         try {

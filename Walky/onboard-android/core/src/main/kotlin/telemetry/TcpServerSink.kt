@@ -6,7 +6,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.put
 import java.io.BufferedInputStream
@@ -39,16 +38,18 @@ data class TcpServerStatus(
  * New clients first receive the last [replayEvents] events. Each client has a bounded
  * line queue; a client that cannot keep up loses lines, which are counted as drops.
  *
- * Lines that concern one client only carry a `link` key and no `seq`: each client first
- * gets `{"link":"hello","protocol":1,…,"session":"<uuid>","port":7777}` (fields from [hello]),
+ * Lines that are not telemetry carry a `link` key and no `seq`: each client first gets
+ * `{"link":"hello","protocol":2,…,"session":"<uuid>","port":7777}` (fields from [hello]),
  * and a client line `{"ping":n}` is answered with `{"link":"pong","ping":n}`, queued behind
- * pending telemetry.
+ * pending telemetry. Every other JSON object a client sends goes to [onLine], on that
+ * client's reader thread; [send] is the way back.
  */
 class TcpServerSink(
     private val port: Int = DEFAULT_PORT,
     private val replayEvents: Int = 200,
     private val clientQueueLines: Int = 4096,
     private val hello: () -> JsonObject = { buildJsonObject {} },
+    private val onLine: (JsonObject) -> Unit = {},
 ) : TelemetrySink {
     override val name = "tcp"
 
@@ -87,6 +88,13 @@ class TcpServerSink(
             while (replay.size > replayEvents) replay.removeFirst()
         }
         clients.forEach { it.offer(lines) }
+    }
+
+    /** Queues [line] for the clients connected now. It is not telemetry: no `seq`, never replayed. */
+    fun send(line: JsonObject) {
+        if (closed) return
+        val text = listOf(line.toString())
+        clients.forEach { it.offer(text) }
     }
 
     override fun takeDropped(): Long = dropped.getAndSet(0)
@@ -182,8 +190,8 @@ class TcpServerSink(
         }
 
         /**
-         * Answers `{"ping":n}` lines and ignores anything else, including lines over
-         * [MAX_CLIENT_LINE_BYTES]. A read returning EOF is the fastest disconnect signal.
+         * Handles one line at a time and ignores anything that is not a JSON object, including
+         * lines over [MAX_CLIENT_LINE_BYTES]. A read returning EOF is the fastest disconnect signal.
          */
         private fun readUntilClosed() {
             try {
@@ -209,9 +217,12 @@ class TcpServerSink(
         }
 
         private fun answer(line: String) {
-            val ping = runCatching {
-                (WalkyJson.parseToJsonElement(line).jsonObject["ping"] as? JsonPrimitive)?.longOrNull
-            }.getOrNull() ?: return
+            val fields = runCatching { WalkyJson.parseToJsonElement(line) as? JsonObject }.getOrNull() ?: return
+            if ("ping" !in fields) {
+                runCatching { onLine(fields) }
+                return
+            }
+            val ping = (fields["ping"] as? JsonPrimitive)?.longOrNull ?: return
             queue.offer(buildJsonObject {
                 put("link", "pong")
                 put("ping", ping)
@@ -221,7 +232,7 @@ class TcpServerSink(
 
     companion object {
         const val DEFAULT_PORT = 7777
-        const val PROTOCOL = 1
+        const val PROTOCOL = 2
         const val MAX_CLIENT_LINE_BYTES = 1024
 
         /** Non-loopback IPv4 addresses of interfaces that are up, e.g. the Wi-Fi address. */

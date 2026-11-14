@@ -2,8 +2,11 @@ import Foundation
 import os
 
 /// Connects to onboard-android through a USB ADB forward.
-/// The Pico over USB via mpremote (`PicoUSBLink`). The controller stays offline until its
-/// transport exists.
+/// The Pico over USB via mpremote (`PicoUSBLink`), or through the phone when the phone
+/// reports its body link connected. The controller stays offline until its transport exists.
+///
+/// Pairing: the Pico's Wi-Fi name and password are read from the board over USB, kept in
+/// the Keychain and sent to the phone on every hello.
 final class PhoneLinkService: RobotLinkService {
     private var current = RobotLinks()
     private let stream: AsyncStream<RobotLinks>
@@ -11,6 +14,10 @@ final class PhoneLinkService: RobotLinkService {
     private let connection: PhoneConnection
     private let runner: CommandRunner
     private let pico: PicoUSBLink
+    private let keychain = PairingKeychain()
+    private var pairing: PicoPairing?
+    private var usb = PicoLink()
+    private var body: PhoneConnection.Body?
 
     /// `pico` should share `runner`, so its mpremote commands reach the activity footer.
     init(connection: PhoneConnection, runner: CommandRunner, pico: PicoUSBLink) {
@@ -19,7 +26,10 @@ final class PhoneLinkService: RobotLinkService {
         self.pico = pico
         (stream, continuation) = AsyncStream.makeStream(of: RobotLinks.self, bufferingPolicy: .bufferingNewest(1))
         continuation.yield(current)
+        pairing = keychain.load()
         connection.onStatus = { [weak self] status in self?.apply(status) }
+        connection.onHello = { [weak self] in self?.sendPairing() }
+        pico.onPairing = { [weak self] pairing in self?.store(pairing) }
         connection.onActivity = { [weak self] entry in self?.record(entry) }
         runner.report = { [weak self] entry in self?.record(entry) }
         pico.observe { [weak self] link in self?.apply(link) }
@@ -60,15 +70,46 @@ final class PhoneLinkService: RobotLinkService {
         phone.rttMs = status.rttMs
         phone.eventsPerSecond = status.eventsPerSecond
         phone.dropped = status.dropped
-        guard phone != current.phone else { return }
+        body = status.body
+        let pico = picoLink()
+        guard phone != current.phone || pico != current.pico else { return }
         current.phone = phone
+        current.pico = pico
         continuation.yield(current)
     }
 
     private func apply(_ link: PicoLink) {
-        guard link != current.pico else { return }
-        current.pico = link
+        usb = link
+        let pico = picoLink()
+        guard pico != current.pico else { return }
+        current.pico = pico
         continuation.yield(current)
+    }
+
+    /// USB wins: plugging the Pico in stops its body link until the next power-on.
+    private func picoLink() -> PicoLink {
+        var link = usb
+        if usb.route != .usb, let body, body.phase == "connected" {
+            link.route = .viaPhone
+            link.bodyMode = body.mode
+        }
+        return link
+    }
+
+    private func store(_ new: PicoPairing) {
+        if new != pairing {
+            pairing = new
+            keychain.save(new)
+            Logger.pico.notice("Pico pairing for \(new.ssid, privacy: .public) read over USB and stored")
+            record(LinkActivity(text: "Pico pairing read over USB", state: .ok(new.ssid)))
+        }
+        // Not sent now: while the Pico is on USB its Wi-Fi is down, so the phone's search could
+        // only fail. The next hello carries it, after the Pico is back on battery.
+    }
+
+    private func sendPairing() {
+        guard let pairing, let line = BodyCommand.pair(pairing).line else { return }
+        connection.send(line)
     }
 
     private func record(_ entry: LinkActivity) {

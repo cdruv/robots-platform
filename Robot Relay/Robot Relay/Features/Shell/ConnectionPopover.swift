@@ -88,7 +88,7 @@ struct ConnectionPopover: View {
                 let mode = Text("power-on \(pico.arm?.label ?? "—")").foregroundStyle(Nocturne.neutral200)
                 Text("\(Text(port).foregroundStyle(Nocturne.neutral200)) · \(runtime)\n\(mode) · \(rail)")
             case .viaPhone:
-                let state = Text(pico.arm?.label ?? "mode —").foregroundStyle(Nocturne.neutral200)
+                let state = Text(pico.bodyMode.map { "legs \($0.rawValue)" } ?? "legs —").foregroundStyle(Nocturne.neutral200)
                 if let reset = pico.lastWatchdogReset {
                     Text("\(state) · \(rail)\n\(Text("watchdog reset \(Fmt.ago(reset))").foregroundStyle(Nocturne.accent300))")
                 } else {

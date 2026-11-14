@@ -9,6 +9,6 @@ nonisolated extension Logger {
     static let pico = Logger(subsystem: subsystem, category: "pico")
     static let firmware = Logger(subsystem: subsystem, category: "firmware")
     static let phone = Logger(subsystem: subsystem, category: "phone")
-    static let calibration = Logger(subsystem: subsystem, category: "calibration")
+    static let body = Logger(subsystem: subsystem, category: "body")
     static let telemetry = Logger(subsystem: subsystem, category: "telemetry")
 }

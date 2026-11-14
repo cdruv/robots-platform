@@ -52,7 +52,7 @@ final class PlaceholderRobotLinkService: RobotLinkService {
             phone: PhoneLink(state: .connected, deviceName: "Pixel 8", rttMs: 38, eventsPerSecond: 18, dropped: 0),
             pico: PicoLink(
                 route: .viaPhone,
-                arm: .armed("body"),
+                bodyMode: .limp,
                 modes: modes,
                 railVolts: 5.9,
                 lastWatchdogReset: Date.now.addingTimeInterval(-120)
