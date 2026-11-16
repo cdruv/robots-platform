@@ -1,5 +1,6 @@
 package com.vadymsidorov.walky.core.events
 
+import com.vadymsidorov.walky.core.cognition.BrainMode
 import com.vadymsidorov.walky.core.cognition.Intent
 import com.vadymsidorov.walky.core.output.Expression
 import kotlinx.serialization.SerialName
@@ -112,7 +113,7 @@ data class ThoughtResult(
     }
 }
 
-/** Direct instructions, for tests and the future debug overlay. */
+/** Direct instructions: user settings, tests and debug tools. */
 @Serializable
 sealed interface Command : ExecutiveEvent
 
@@ -127,3 +128,13 @@ data class SayText(val text: String) : Command
 @Serializable
 @SerialName("SetExpression")
 data class SetExpression(val expression: Expression) : Command
+
+/** Handled by the Executive itself: replaces the brain and resets state to neutral. */
+@Serializable
+@SerialName("SetBrain")
+data class SetBrain(val mode: BrainMode) : Command
+
+/** Handled by the Executive itself: the user's mute, which overrides a brain's `listening`. */
+@Serializable
+@SerialName("SetMuted")
+data class SetMuted(val muted: Boolean) : Command

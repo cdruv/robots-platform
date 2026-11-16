@@ -14,8 +14,6 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -36,7 +34,6 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -52,10 +49,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.withStyle
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -68,40 +63,18 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-// Palette and metrics from the face design handoff. Green, amber and red are status colours
-// the handoff does not cover.
-private val Mono = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp, lineHeight = 17.sp)
-private val Dim = Color(0xFF9A5A9C)
-private val Timestamp = Color(0xFF8A3A8C)
-private val Bright = Color(0xFFFDE8FF)
-private val Cyan = Color(0xFF5FE3FF)
-private val Amber = Color(1f, 0.75f, 0.25f)
-private val Red = Color(1f, 0.4f, 0.4f)
-private val Green = Color(0.45f, 0.9f, 0.5f)
-private val FabFill = Color(0xFF1B1522)
-private val FabDots = Color(0xFF6B6B7A)
-
 /** Bug-shaped debug toggle, kept available when the overlay is closed. */
 @Composable
 fun DebugToggle(active: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
-    Box(
-        modifier.windowInsetsPadding(WindowInsets.safeDrawing).padding(18.dp)
-            .size(44.dp).clip(CircleShape).background(FabFill)
-            .semantics { contentDescription = if (active) "Close debug overlay" else "Open debug overlay" }
-            .clickable(role = Role.Button, onClick = onClick),
-        contentAlignment = Alignment.Center,
-    ) {
-        Canvas(Modifier.size(24.dp)) {
-            val color = if (active) Cyan else FabDots
-            val u = size.width / 24f
-            drawRoundRect(color, Offset(7*u, 6*u), Size(10*u, 15*u), androidx.compose.ui.geometry.CornerRadius(5*u))
-            for (y in listOf(9f, 14f, 18f)) {
-                drawLine(color, Offset(3*u, y*u), Offset(21*u, y*u), 2*u)
-            }
-            drawLine(color, Offset(8*u, 3*u), Offset(11*u, 7*u), 2*u)
-            drawLine(color, Offset(16*u, 3*u), Offset(13*u, 7*u), 2*u)
-            drawLine(FabFill, Offset(12*u, 11*u), Offset(12*u, 19*u), u)
+    CornerButton(if (active) "Close debug overlay" else "Open debug overlay", active, onClick, modifier) { color ->
+        val u = size.width / 24f
+        drawRoundRect(color, Offset(7*u, 6*u), Size(10*u, 15*u), androidx.compose.ui.geometry.CornerRadius(5*u))
+        for (y in listOf(9f, 14f, 18f)) {
+            drawLine(color, Offset(3*u, y*u), Offset(21*u, y*u), 2*u)
         }
+        drawLine(color, Offset(8*u, 3*u), Offset(11*u, 7*u), 2*u)
+        drawLine(color, Offset(16*u, 3*u), Offset(13*u, 7*u), 2*u)
+        drawLine(FabFill, Offset(12*u, 11*u), Offset(12*u, 19*u), u)
     }
 }
 
@@ -115,7 +88,7 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
     val picoWifi by runtime.picoWifi.status.collectAsStateWithLifecycle()
     val logs by runtime.recentLogs.logs.collectAsStateWithLifecycle()
     var fontSize by rememberSaveable { mutableIntStateOf(13) }
-    var settings by rememberSaveable { mutableStateOf(false) }
+    var options by rememberSaveable { mutableStateOf(false) }
     val rows = remember(logs) { logs.asReversed() }
     val listState = rememberLazyListState()
     var following by remember { mutableStateOf(true) }
@@ -140,8 +113,8 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
         }
     }
     // Key on sequence, not count: the ring buffer stays at 300 entries when full.
-    LaunchedEffect(logs.lastOrNull()?.seq, following, settings, listState.isScrollInProgress) {
-        if (following && !settings && !listState.isScrollInProgress) listState.scrollToItem(0)
+    LaunchedEffect(logs.lastOrNull()?.seq, following, options, listState.isScrollInProgress) {
+        if (following && !options && !listState.isScrollInProgress) listState.scrollToItem(0)
     }
     val time = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
 
@@ -161,7 +134,6 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
                 HearingState.Muted -> Amber
                 HearingState.Stopped, HearingState.NoPermission, HearingState.Error -> Red
             }
-            val muted = hearing.muted
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 BasicText("hearing ", style = Mono.copy(color = Dim))
                 BasicText(hearing.state.name.lowercase(), style = Mono.copy(color = stateColor))
@@ -169,13 +141,6 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
                     "  ${hearing.engine}  #${hearing.sessions}  ${hearing.rmsDb.coerceAtLeast(0f).toInt().let { "▮".repeat(it / 2) }}",
                     style = Mono.copy(color = Dim),
                     modifier = Modifier.weight(1f),
-                )
-                BasicText(
-                    if (muted) "[unmute]" else "[mute]",
-                    style = Mono.copy(color = Amber),
-                    modifier = Modifier.clickable(interactionSource = null, indication = null) {
-                        runtime.hearing.setEnabled(muted)
-                    },
                 )
             }
             hearing.lastError?.let { BasicText("error $it", style = Mono.copy(color = Red)) }
@@ -232,16 +197,16 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
         Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(Dim.copy(alpha = 0.45f)))
         BasicText(
-            if (settings) "DEBUG SETTINGS" else "LOGS · ${logs.size} · ${if (following) "live" else "paused"} · tap for details",
+            if (options) "LOG OPTIONS" else "LOGS · ${logs.size} · ${if (following) "live" else "paused"} · tap for details",
             style = Mono.copy(color = Dim), modifier = Modifier.padding(vertical = 8.dp),
         )
         Box(Modifier.weight(1f)) {
-            if (settings) {
+            if (options) {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     BasicText("Log font size", style = Mono.copy(color = Bright))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(11, 13, 16, 19).forEach { size ->
-                            DebugButton("$size", fontSize == size) { fontSize = size }
+                            ChoiceButton("$size", fontSize == size) { fontSize = size }
                         }
                     }
                     BasicText("CPU: app usage; 100% = one core.\nMemory: app PSS.\nGPU: average render time per frame over the last second; not utilization. — means no supported samples.", style = Mono.copy(color = Dim))
@@ -266,12 +231,12 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
                 following = true
             }
             FooterButton(
-                if (settings) "Logs" else "Settings",
-                if (settings) FooterIcon.Back else FooterIcon.Settings,
-                selected = settings,
-            ) { settings = !settings }
+                if (options) "Logs" else "Options",
+                if (options) FooterIcon.Back else FooterIcon.Options,
+                selected = options,
+            ) { options = !options }
             Spacer(Modifier.weight(1f))
-            if (!settings && !following) FooterButton("Latest", FooterIcon.Latest) { following = true }
+            if (!options && !following) FooterButton("Latest", FooterIcon.Latest) { following = true }
         }
     }
 }
@@ -309,14 +274,7 @@ private fun LogRow(event: TelemetryEvent, time: SimpleDateFormat, fontSize: Int)
     }
 }
 
-@Composable
-private fun DebugButton(label: String, selected: Boolean = false, onClick: () -> Unit) {
-    BasicText(label, style = Mono.copy(color = if (selected) Cyan else Bright),
-        modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Dim.copy(alpha = 0.15f))
-            .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 10.dp, vertical = 14.dp))
-}
-
-private enum class FooterIcon { Clear, Settings, Back, Latest }
+private enum class FooterIcon { Clear, Options, Back, Latest }
 
 @Composable
 private fun FooterButton(
@@ -347,7 +305,7 @@ private fun FooterButton(
                     line(10f, 10f, 10f, 17f)
                     line(14f, 10f, 14f, 17f)
                 }
-                FooterIcon.Settings -> {
+                FooterIcon.Options -> {
                     // Sliders remain legible at this compact size.
                     for ((y, knob) in listOf(6f to 9f, 12f to 16f, 18f to 8f)) {
                         line(3f, y, knob - 2f, y)

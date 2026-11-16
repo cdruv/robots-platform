@@ -21,8 +21,14 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -30,6 +36,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
@@ -40,6 +47,8 @@ import com.vadymsidorov.walky.face.FaceRenderer
 private val FaceBackground = Color(0xFF0D0712)
 private val OverlayFade = tween<Float>(240)
 
+private enum class Overlay { Debug, Settings }
+
 /** Runtime permissions and what each one enables. */
 private val PERMISSIONS = mapOf(
     Manifest.permission.RECORD_AUDIO to "hearing",
@@ -48,8 +57,9 @@ private val PERMISSIONS = mapOf(
 )
 
 /**
- * Full-screen face with a small corner button that toggles the debug overlay. Senses run
- * only while resumed, focused, unlocked, and on an active display.
+ * Full-screen face with two corner buttons, each toggling an overlay (settings, debug) over
+ * the dimmed face; at most one is open. Senses run only while resumed, focused, unlocked,
+ * and on an active display.
  */
 class MainActivity : ComponentActivity() {
     private val runtime get() = (application as WalkyApplication).runtime
@@ -103,18 +113,26 @@ class MainActivity : ComponentActivity() {
     private fun showFace() {
         val runtime = runtime
         faceView.setContent {
-            var showDebug by rememberSaveable { mutableStateOf(false) }
+            var overlay by rememberSaveable { mutableStateOf<Overlay?>(null) }
+            fun toggle(which: Overlay) {
+                overlay = if (overlay == which) null else which
+            }
             Box(Modifier.fillMaxSize().background(FaceBackground)) {
                 val target by runtime.face.state.collectAsStateWithLifecycle()
-                FaceRenderer(target, motionReflex = runtime.faceMotionReflex, overlayVisible = showDebug)
-                AnimatedVisibility(showDebug, enter = fadeIn(OverlayFade), exit = fadeOut(OverlayFade)) {
+                FaceRenderer(target, motionReflex = runtime.faceMotionReflex, overlayVisible = overlay != null)
+                AnimatedVisibility(overlay == Overlay.Debug, enter = fadeIn(OverlayFade), exit = fadeOut(OverlayFade)) {
                     DebugOverlay(runtime, window, Modifier.fillMaxSize())
                 }
-                DebugToggle(
-                    active = showDebug,
-                    onClick = { showDebug = !showDebug },
-                    modifier = Modifier.align(Alignment.BottomEnd),
-                )
+                AnimatedVisibility(overlay == Overlay.Settings, enter = fadeIn(OverlayFade), exit = fadeOut(OverlayFade)) {
+                    SettingsOverlay(runtime.settings, Modifier.fillMaxSize())
+                }
+                Row(
+                    Modifier.align(Alignment.BottomEnd).windowInsetsPadding(WindowInsets.safeDrawing).padding(18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    SettingsToggle(overlay == Overlay.Settings, { toggle(Overlay.Settings) })
+                    DebugToggle(overlay == Overlay.Debug, { toggle(Overlay.Debug) })
+                }
             }
         }
     }

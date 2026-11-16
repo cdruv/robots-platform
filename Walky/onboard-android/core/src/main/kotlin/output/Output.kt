@@ -15,8 +15,9 @@ data class Output(
 )
 
 /**
- * Speech output. Implementations report progress as
- * [com.vadymsidorov.walky.core.events.OutputFeedback] events tagged with [id].
+ * Speech output. Every [say] is answered, tagged with its id, by `SpeechStarted` then
+ * `SpeechFinished`, or by `SpeechFailed`. [stop] or a newer [say] ends the current utterance
+ * with `SpeechFailed(id, "stopped")`.
  */
 interface Voice {
     fun say(id: String, text: String)
