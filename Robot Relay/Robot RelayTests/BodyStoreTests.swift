@@ -230,31 +230,36 @@ struct BodyStoreTests {
 }
 
 struct BodyLineTests {
-    private func decode(_ line: String) -> PhoneLine? {
-        PhoneLine.decode(Data(line.utf8))
+    private func read(_ messages: (String, String)...) throws -> [PhoneMessage] {
+        var stream = PhoneStream()
+        let bytes = messages.reduce(PhoneStreamFixture.preamble(session: "s")) { $0 + PhoneStreamFixture.message($1.0, $1.1) }
+        return try stream.append(bytes).filter { if case .hello = $0 { false } else { true } }
     }
 
-    @Test func bodyLineCarriesThePicosStateAsTheFirmwareNamesIt() {
-        let line = """
-            {"link":"body","phase":"connected","rttMs":12,"pico":{"v":1,"board":"e66118604b","mode":"active",\
-            "target":[12.5,-30.0],"pulses":[1638,1830],"trim":[2,-1],"saved":[2,0],"stored":true,"slew":360,\
-            "n":41,"error":{"n":40,"msg":"Unknown command"},"up_ms":123456}}
-            """
+    private let state = #"{"t":"state","v":1,"board":"e66118604b","mode":"active","target":[12.5,-30.0],"pulses":[1638,1830],"trim":[2,-1],"saved":[2,0],"stored":true,"slew":360,"n":41,"error":{"n":40,"msg":"Unknown command"},"up_ms":123456}"#
+
+    @Test func theLinkCarriesThePicosStateAsTheFirmwareNamesIt() throws {
         let pico = PicoBodyState(board: "e66118604b", mode: .active, target: [12.5, -30], pulses: [1638, 1830],
                                  trim: [2, -1], saved: [2, 0], stored: true, error: .init(msg: "Unknown command"))
-        #expect(decode(line) == .body(BodyLink(phase: "connected", pico: pico, rttMs: 12)))
+        // The phone replays the latched state before the latched link.
+        let messages = try read(("/body/state", state), ("/body/link", #"{"phase":"connected","rttMs":12}"#), ("/body/state", state))
+        #expect(messages == Array(repeating: .body(BodyLink(phase: "connected", pico: pico, rttMs: 12)), count: 2))
     }
 
-    @Test func bodyLineWithoutAPicoIsStillABodyLine() {
-        #expect(decode(#"{"link":"body","phase":"searching"}"#) == .body(BodyLink(phase: "searching", pico: nil, rttMs: nil)))
+    @Test func aLinkThatIsNotConnectedCarriesNoPico() throws {
+        let messages = try read(
+            ("/body/link", #"{"phase":"connected"}"#), ("/body/state", state),
+            ("/body/link", #"{"phase":"searching"}"#), ("/body/state", state),
+        )
+        #expect(messages.last == .body(BodyLink(phase: "searching", pico: nil, rttMs: nil)))
+        #expect(messages.count == 3, "a state while not connected is not a report")
         // The phone omits nulls: a limp Pico has no pulses and no error.
-        let limp = #"{"link":"body","phase":"connected","pico":{"v":1,"board":"b","mode":"limp","target":[0,0],"trim":[0,0],"saved":[0,0],"stored":false,"slew":360,"up_ms":5}}"#
-        guard case .body(let link)? = decode(limp) else {
-            Issue.record("not decoded as a body line")
+        let limp = #"{"t":"state","v":1,"board":"b","mode":"limp","target":[0,0],"trim":[0,0],"saved":[0,0],"stored":false,"slew":360,"up_ms":5}"#
+        guard case .body(let link)? = try read(("/body/link", #"{"phase":"connected"}"#), ("/body/state", limp)).last else {
+            Issue.record("not decoded as a body report")
             return
         }
         #expect(link.pico?.pulses == nil && link.pico?.error == nil && link.pico?.mode == .limp)
-        #expect(decode(#"{"link":"body"}"#) == nil)
     }
 
     @Test func commandsAreTheLinesThePhoneExpects() {
@@ -277,10 +282,11 @@ struct PhoneBodyStatusTests {
         var hellos = 0
         connection.onBody = { reports.append($0) }
         connection.onHello = { _ in hellos += 1 }
-        connection.handle(line: Data(#"{"link":"hello","device":"Pixel","session":"s"}"#.utf8))
-        connection.handle(line: Data(#"{"link":"hello","device":"Pixel","session":"s"}"#.utf8))
+        connection.handle(data: PhoneStreamFixture.preamble(session: "s"))
+        connection.startStream()
+        connection.handle(data: PhoneStreamFixture.preamble(session: "s"))
         #expect(hellos == 2, "the pairing is re-sent after a reconnect in the same session")
-        connection.handle(line: Data(#"{"link":"body","phase":"searching"}"#.utf8))
+        connection.handle(data: PhoneStreamFixture.message("/body/link", #"{"phase":"searching"}"#))
         #expect(reports == [BodyLink(phase: "searching", pico: nil, rttMs: nil)])
         #expect(connection.status.body == PhoneConnection.Body(phase: "searching", mode: nil))
         connection.disconnect()

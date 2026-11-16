@@ -2,6 +2,7 @@ package com.vadymsidorov.walky
 
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import com.vadymsidorov.walky.body.PicoWifi
 import com.vadymsidorov.walky.core.body.BodyLink
 import com.vadymsidorov.walky.core.body.BodyRelay
@@ -13,28 +14,33 @@ import com.vadymsidorov.walky.core.reflex.MotionReflex
 import com.vadymsidorov.walky.core.senses.Sense
 import com.vadymsidorov.walky.core.telemetry.DefaultTelemetry
 import com.vadymsidorov.walky.core.telemetry.RecentLogsSink
+import com.vadymsidorov.walky.core.telemetry.Recorder
+import com.vadymsidorov.walky.core.telemetry.Topics
 import com.vadymsidorov.walky.core.telemetry.TcpServerSink
 import com.vadymsidorov.walky.output.ComposeFace
+import com.vadymsidorov.walky.senses.CameraSense
 import com.vadymsidorov.walky.senses.HearingSense
 import com.vadymsidorov.walky.senses.ImuSense
+import com.vadymsidorov.walky.senses.SystemSense
 import com.vadymsidorov.walky.telemetry.LogcatSink
+import com.vadymsidorov.walky.telemetry.Recordings
 import com.vadymsidorov.walky.telemetry.RelayWifi
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
+import java.util.UUID
 
 /** Owns a foreground session. Construction alone starts no work. */
 class Runtime(context: Context) {
     private val app = context.applicationContext
     val recentLogs = RecentLogsSink()
-    val face = ComposeFace()
+    val face = ComposeFace { telemetry }
     val inference = Inference()
     val picoWifi = PicoWifi(app) { telemetry.logger("pico-wifi") }
     private val relayWifi = RelayWifi(app) { telemetry.logger("relay-wifi") }
+    private val recordings = Recordings(app)
     private var session = Session()
     private var running = false
     private var used = false
@@ -58,9 +64,11 @@ class Runtime(context: Context) {
         }
         used = true
         running = true
+        session.recorder.start()
         telemetryServer.start()
         relayWifi.start(telemetryServer.status.value.wifiPort)
         telemetry.start()
+        face.recordState()
         telemetry.logger("runtime").info(
             "resumed: inference ${inference.backendName}, reflexes imu->face, telemetry port ${telemetryServer.status.value.port}",
         )
@@ -85,6 +93,8 @@ class Runtime(context: Context) {
         picoWifi.pause()
         relayWifi.stop()
         telemetryServer.close()
+        // Finishes the file on its own thread; anything written after this is not recorded.
+        session.recorder.close()
         session.scope.cancel()
     }
 
@@ -101,22 +111,41 @@ class Runtime(context: Context) {
     private inner class Session {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default +
             CoroutineExceptionHandler { _, e -> android.util.Log.e("Walky", "session failure", e) })
+        val id = UUID.randomUUID().toString()
+        private val device = "${Build.MANUFACTURER} ${Build.MODEL}"
+        val recorder = Recorder(
+            open = { recordings.create(id, System.currentTimeMillis()) },
+            metadata = mapOf(
+                "session" to id,
+                "device" to device,
+                "app" to versionName().orEmpty(),
+                "clock" to "boottime",
+                "startWallMs" to System.currentTimeMillis().toString(),
+                "startBootNs" to SystemClock.elapsedRealtimeNanos().toString(),
+                "mount" to "portrait; screen and front camera face forward",
+            ),
+            log = { telemetry.logger("recording") },
+        )
         val server: TcpServerSink = TcpServerSink(
-            hello = {
-                buildJsonObject {
-                    put("device", "${Build.MANUFACTURER} ${Build.MODEL}")
-                    put("app", versionName())
-                }
-            },
+            hello = { mapOf("device" to device, "app" to versionName().orEmpty()) },
             onLine = { bodyRelay.onLine(it) },
             wifi = relayWifi,
+            session = id,
+            requestKeyframe = { camera.requestKeyframe() },
+            monoNs = SystemClock::elapsedRealtimeNanos,
         )
-        val telemetry = DefaultTelemetry(listOf(LogcatSink(), server, recentLogs), scope)
-        val hearing = HearingSense(app, telemetry.logger("hearing"))
-        val imu = ImuSense(app, telemetry.logger("imu"))
-        val senses: List<Sense> = listOf(hearing, imu)
-        val body = PicoBody(picoWifi::socket, scope, telemetry.logger("body"))
-        val bodyRelay = BodyRelay(body, picoWifi::pair, server::send, scope) { bodyPhase(it) }
+        // One clock for every timestamp: boottime, the clock of sensor and camera events.
+        val telemetry: DefaultTelemetry = DefaultTelemetry(
+            listOf(LogcatSink(), recentLogs), scope,
+            streams = listOf(recorder, server),
+            monoNs = SystemClock::elapsedRealtimeNanos,
+        )
+        val hearing = HearingSense(app, telemetry.logger("hearing"), telemetry.channel(Topics.Hearing))
+        val imu = ImuSense(app, telemetry)
+        val camera = CameraSense(app, telemetry)
+        val senses: List<Sense> = listOf(hearing, imu, camera, SystemSense(app))
+        val body = PicoBody(picoWifi::socket, scope, telemetry)
+        val bodyRelay = BodyRelay(body, picoWifi::pair, telemetry.channel(Topics.BodyLink), scope) { bodyPhase(it) }
 
         fun onPercept(percept: Percept) {
             telemetry.emit("sense", percept::class.simpleName ?: "Percept", Percept.serializer(), percept)

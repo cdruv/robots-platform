@@ -1,6 +1,5 @@
 package com.vadymsidorov.walky.core.body
 
-import com.vadymsidorov.walky.core.telemetry.Logger
 import com.vadymsidorov.walky.core.telemetry.WalkyJson
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
@@ -8,7 +7,6 @@ import java.io.Closeable
 import java.net.InetAddress
 import java.net.ServerSocket
 import java.net.Socket
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
@@ -94,13 +92,6 @@ class FakePico(private val heartbeat: Boolean = true) : Closeable {
     }
 
     private val JsonObject.type get() = this["t"]?.toString()?.trim('"')
-}
-
-class RecordingLogger : Logger {
-    val lines = CopyOnWriteArrayList<String>()
-    override fun info(message: String) { lines += "info $message" }
-    override fun warn(message: String, error: Throwable?) { lines += "warn $message" }
-    override fun error(message: String, error: Throwable?) { lines += "error $message" }
 }
 
 fun <T> eventually(timeoutMs: Long = 3_000, what: String = "condition", probe: () -> T?): T {

@@ -32,7 +32,7 @@ nonisolated struct PhoneLink: Equatable, Sendable {
     var route: Route?
     /// Relay has the phone's certificate from a USB hello, so it can connect over Wi-Fi.
     var isPairedForWifi = false
-    /// From the phone's hello line.
+    /// From the phone's hello.
     var deviceName = "—"
     var rttMs: Int?
     var eventsPerSecond = 0

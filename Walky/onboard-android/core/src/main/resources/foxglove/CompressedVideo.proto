@@ -1,0 +1,14 @@
+// Foxglove's schema. CompressedVideo.fds is generated from it:
+//   protoc --include_imports --descriptor_set_out=CompressedVideo.fds foxglove/CompressedVideo.proto
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package foxglove;
+
+message CompressedVideo {
+  google.protobuf.Timestamp timestamp = 1;
+  string frame_id = 2;
+  bytes data = 3;
+  string format = 4;
+}

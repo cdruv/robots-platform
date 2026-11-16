@@ -63,7 +63,7 @@ import com.vadymsidorov.walky.Runtime
 import com.vadymsidorov.walky.core.telemetry.TelemetryEvent
 import com.vadymsidorov.walky.core.telemetry.presentation
 import com.vadymsidorov.walky.core.telemetry.toJsonLine
-import com.vadymsidorov.walky.senses.HearingState
+import com.vadymsidorov.walky.core.senses.HearingState
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale

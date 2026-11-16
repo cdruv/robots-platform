@@ -13,27 +13,16 @@ import android.speech.SpeechRecognizer
 import com.vadymsidorov.walky.core.events.HeardUtterance
 import com.vadymsidorov.walky.core.events.Percept
 import com.vadymsidorov.walky.core.senses.HearingControl
+import com.vadymsidorov.walky.core.senses.HearingState
+import com.vadymsidorov.walky.core.senses.HearingStatus
 import com.vadymsidorov.walky.core.senses.Sense
 import com.vadymsidorov.walky.core.telemetry.Logger
+import com.vadymsidorov.walky.core.telemetry.TelemetryChannel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.util.Locale
-
-enum class HearingState { Stopped, NoPermission, Starting, Listening, Speech, Muted, Error }
-
-/** Live view of the recognizer for the debug overlay; percepts still flow through [Sense.start]. */
-data class HearingStatus(
-    val state: HearingState = HearingState.Stopped,
-    val muted: Boolean = false,
-    val engine: String = "",
-    val partial: String = "",
-    val lastFinal: String = "",
-    val lastError: String? = null,
-    val rmsDb: Float = -2f,
-    val sessions: Int = 0,
-)
 
 /**
  * Continuous on-device speech recognition. Android ends a recognizer session after each
@@ -43,8 +32,13 @@ data class HearingStatus(
  * platform requires; [start] and [stop] can be called from anywhere.
  *
  * Callbacks from destroyed recognizers or received while no session is active are ignored.
+ * Every [status] change, input level included, is recorded on [record].
  */
-class HearingSense(private val context: Context, private val log: Logger) : Sense, HearingControl {
+class HearingSense(
+    private val context: Context,
+    private val log: Logger,
+    private val record: TelemetryChannel<HearingStatus>,
+) : Sense, HearingControl {
     override val name = "hearing"
 
     private val current = MutableStateFlow(HearingStatus())
@@ -68,8 +62,15 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
         listening = true
         ready = false
         lastPartial = ""
-        current.update { it.copy(state = HearingState.Starting, partial = "", sessions = it.sessions + 1) }
+        update { it.copy(state = HearingState.Starting, partial = "", sessions = it.sessions + 1) }
         r.startListening(recognizerIntent())
+    }
+
+    /** Main thread only, so the recorded order is the order of changes. */
+    private fun update(change: (HearingStatus) -> HearingStatus) {
+        val before = current.value
+        current.update(change)
+        if (current.value != before) record.write(current.value)
     }
 
     private fun onMain(block: () -> Unit) {
@@ -81,7 +82,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             if (running) return@onMain
             if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
                 log.warn("hearing not started: RECORD_AUDIO not granted")
-                current.update { it.copy(state = HearingState.NoPermission) }
+                update { it.copy(state = HearingState.NoPermission) }
                 return@onMain
             }
             this.post = post
@@ -93,7 +94,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             val r = SpeechRecognizer.createOnDeviceSpeechRecognizer(context)
             r.setRecognitionListener(Listener(r))
             recognizer = r
-            current.update { it.copy(engine = "on-device", lastError = null) }
+            update { it.copy(engine = "on-device", lastError = null) }
             log.info("hearing using on-device recognizer, locale ${Locale.getDefault().toLanguageTag()}")
             listenSoon(0)
         }
@@ -108,7 +109,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             recognizer?.destroy()
             recognizer = null
             post = null
-            current.update { it.copy(state = HearingState.Stopped, partial = "", rmsDb = -2f) }
+            update { it.copy(state = HearingState.Stopped, partial = "", rmsDb = -2f) }
             log.info("hearing stopped")
         }
     }
@@ -118,14 +119,14 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             if (this.enabled == enabled) return@onMain
             this.enabled = enabled
             log.info(if (enabled) "hearing unmuted" else "hearing muted")
-            current.update { it.copy(muted = !enabled) }
+            update { it.copy(muted = !enabled) }
             if (enabled) {
                 if (running && !listening) listenSoon(RESTART_DELAY_MS)
             } else {
                 main.removeCallbacks(listen)
                 // A session still starting is cancelled from onReadyForSpeech instead.
                 if (listening && ready) endSession()
-                if (running) current.update { it.copy(state = HearingState.Muted, partial = "", rmsDb = -2f) }
+                if (running) update { it.copy(state = HearingState.Muted, partial = "", rmsDb = -2f) }
             }
         }
     }
@@ -161,17 +162,17 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
                 endSession()
                 return
             }
-            current.update { it.copy(state = HearingState.Listening, lastError = null) }
+            update { it.copy(state = HearingState.Listening, lastError = null) }
         }
 
         override fun onBeginningOfSpeech() {
             if (!active || !enabled) return
-            current.update { it.copy(state = HearingState.Speech) }
+            update { it.copy(state = HearingState.Speech) }
         }
 
         override fun onRmsChanged(rmsdB: Float) {
             if (!active || !enabled) return
-            current.update { it.copy(rmsDb = rmsdB) }
+            update { it.copy(rmsDb = rmsdB) }
         }
 
         override fun onPartialResults(partialResults: Bundle) {
@@ -180,7 +181,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
                 ?.firstOrNull()?.trim()
             if (!text.isNullOrEmpty() && text != lastPartial) {
                 lastPartial = text
-                current.update { it.copy(partial = text) }
+                update { it.copy(partial = text) }
                 post?.invoke(HeardUtterance(text, isFinal = false))
             }
         }
@@ -192,7 +193,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             if (!enabled) return // Muted while the session was starting.
             val text = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull()?.trim()
             val confidence = results.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)?.firstOrNull()
-            current.update { it.copy(partial = "") }
+            update { it.copy(partial = "") }
             if (!text.isNullOrEmpty()) postFinal(text, confidence)
             listenSoon(RESTART_DELAY_MS)
         }
@@ -206,7 +207,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
             when (error) {
                 // Silence is normal in a continuous listening loop.
                 SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                    current.update { it.copy(partial = "") }
+                    update { it.copy(partial = "") }
                     listenSoon(RESTART_DELAY_MS)
                 }
                 SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> fail(name, HearingState.NoPermission)
@@ -215,7 +216,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
                 -> fail(name)
                 else -> {
                     log.warn("recognizer error $name; retrying in ${ERROR_DELAY_MS}ms")
-                    current.update { it.copy(state = HearingState.Error, partial = "", lastError = name) }
+                    update { it.copy(state = HearingState.Error, partial = "", lastError = name) }
                     listenSoon(ERROR_DELAY_MS)
                 }
             }
@@ -227,7 +228,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
     }
 
     private fun postFinal(text: String, confidence: Float?) {
-        current.update { it.copy(partial = "", lastFinal = text) }
+        update { it.copy(partial = "", lastFinal = text) }
         log.info("heard “$text”")
         post?.invoke(HeardUtterance(text, isFinal = true, confidence = confidence))
     }
@@ -240,7 +241,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
         recognizer?.destroy()
         recognizer = null
         post = null
-        current.update { it.copy(state = state, partial = "", rmsDb = -2f, lastError = error) }
+        update { it.copy(state = state, partial = "", rmsDb = -2f, lastError = error) }
         log.error("hearing stopped: $error")
     }
 

@@ -1,6 +1,9 @@
 package com.vadymsidorov.walky.core.body
 
 import com.vadymsidorov.walky.core.output.LegTargets
+import com.vadymsidorov.walky.core.telemetry.FakeTelemetry
+import com.vadymsidorov.walky.core.telemetry.Topics
+import kotlinx.serialization.json.jsonObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,13 +19,13 @@ import java.util.concurrent.atomic.AtomicInteger
 
 class PicoBodyTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val logger = RecordingLogger()
+    private val telemetry = FakeTelemetry()
     private val picos = mutableListOf<FakePico>()
 
     private fun pico(heartbeat: Boolean = true) = FakePico(heartbeat).also { picos += it }
 
     private fun connected(pico: FakePico): PicoBody {
-        val body = PicoBody(pico::connect, scope, logger).also { it.start() }
+        val body = PicoBody(pico::connect, scope, telemetry).also { it.start() }
         eventually(what = "link up") { body.state.value.pico }
         return body
     }
@@ -36,7 +39,7 @@ class PicoBodyTest {
     @Test
     fun publishesThePicoStateAsTheFirmwareWritesIt() {
         val pico = pico(heartbeat = false)
-        val body = PicoBody(pico::connect, scope, logger).also { it.start() }
+        val body = PicoBody(pico::connect, scope, telemetry).also { it.start() }
         assertEquals(BodyLink(BodyLink.Phase.Connecting), body.state.value)
         eventually { pico.connections == 1 }
         pico.state(mode = "active", trim = "[2, -1]", saved = "[2, 0]", stored = true,
@@ -50,8 +53,13 @@ class PicoBodyTest {
                 slew = 360, n = link.pico!!.n, error = PicoError(4, "Unknown command"), upMs = link.pico!!.upMs),
             link.pico,
         )
-        assertTrue(logger.lines.toString(), logger.lines.any { it.startsWith("info Pico link up") })
-        assertTrue(logger.lines.toString(), logger.lines.any { it == "warn Pico: Unknown command" })
+        assertTrue(telemetry.lines.toString(), telemetry.lines.any { it.startsWith("info Pico link up") })
+        assertTrue(telemetry.lines.toString(), telemetry.lines.any { it == "warn Pico: Unknown command" })
+
+        val recorded = telemetry.values(Topics.BodyState).single().jsonObject
+        assertEquals("the state line as received", "\"state\"", recorded["t"].toString())
+        assertEquals("[2,-1]", recorded["trim"].toString())
+        assertEquals("""{"n":4,"msg":"Unknown command"}""", recorded["error"].toString())
     }
 
     @Test
@@ -72,6 +80,7 @@ class PicoBodyTest {
         val numbers = sent.map { it["n"].toString().toLong() }
         assertEquals("n counts up within the connection", numbers.sorted().distinct(), numbers)
         assertNull("a target is sent once; holding a pose is the driver's job", pico.next(timeoutMs = 400))
+        assertEquals("each command is recorded as sent, pings are not", sent, telemetry.values(Topics.BodyCommand))
     }
 
     @Test
@@ -87,7 +96,7 @@ class PicoBodyTest {
     @Test
     fun silenceFromThePicoForASecondCountsAsLinkDownAndItReconnects() {
         val pico = pico(heartbeat = false)
-        val body = PicoBody(pico::connect, scope, logger).also { it.start() }
+        val body = PicoBody(pico::connect, scope, telemetry).also { it.start() }
         eventually { pico.connections == 1 }
         pico.state()
         eventually { body.state.value.pico }
@@ -95,7 +104,7 @@ class PicoBodyTest {
         eventually(what = "link down") { body.state.value == BodyLink() }
         val elapsedMs = (System.nanoTime() - silentSince) / 1_000_000
         assertTrue("went down after $elapsedMs ms", elapsedMs in 800..2_000)
-        assertTrue(logger.lines.toString(), logger.lines.any { it.startsWith("warn Pico link down: no state") })
+        assertTrue(telemetry.lines.toString(), telemetry.lines.any { it.startsWith("warn Pico link down: no state") })
         eventually(what = "reconnect") { pico.connections == 2 }
     }
 
@@ -127,18 +136,18 @@ class PicoBodyTest {
         val body = PicoBody({
             if (attempts.incrementAndGet() <= 3) throw IOException("no route")
             pico.connect()
-        }, scope, logger).also { it.start() }
+        }, scope, telemetry).also { it.start() }
         eventually(what = "link up") { body.state.value.pico }
-        assertEquals(1, logger.lines.count { it.startsWith("warn Pico connect failed") })
+        assertEquals(1, telemetry.lines.count { it.startsWith("warn Pico connect failed") })
     }
 
     @Test
     fun aPicoSpeakingAnotherProtocolVersionIsNotTreatedAsConnected() {
         val pico = pico(heartbeat = false)
-        val body = PicoBody(pico::connect, scope, logger).also { it.start() }
+        val body = PicoBody(pico::connect, scope, telemetry).also { it.start() }
         eventually { pico.connections == 1 }
         pico.state(version = 2)
-        eventually { logger.lines.any { "body v2" in it } }
+        eventually { telemetry.lines.any { "body v2" in it } }
         assertNull(body.state.value.pico)
     }
 

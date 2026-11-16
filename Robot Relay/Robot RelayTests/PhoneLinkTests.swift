@@ -2,70 +2,79 @@ import Foundation
 import Testing
 @testable import Robot_Relay
 
-struct PhoneLineTests {
-    private func decode(_ line: String) -> PhoneLine? {
-        PhoneLine.decode(Data(line.utf8))
+struct PhoneStreamTests {
+    private func read(_ chunks: Data...) throws -> [PhoneMessage] {
+        var stream = PhoneStream()
+        return try chunks.flatMap { try stream.append($0) }
     }
 
-    @Test func helloLine() {
-        let line = #"{"link":"hello","protocol":1,"device":"Google Pixel 8","app":"1.0","session":"4f2c9a1e","port":7777}"#
-        guard case .hello(let hello) = decode(line) else {
-            Issue.record("not a hello")
+    @Test func helloComesFromTheMetadataRecord() throws {
+        let messages = try read(PhoneStreamFixture.preamble(
+            session: "4f2c9a1e", device: "Google Pixel 8", ["app": "1.0", "port": "7777", "cert": "75a342"]))
+        guard case .hello(let hello)? = messages.first, messages.count == 1 else {
+            Issue.record("not one hello: \(messages)")
             return
         }
-        #expect(hello.protocol == 1)
-        #expect(hello.device == "Google Pixel 8")
-        #expect(hello.session == "4f2c9a1e")
-        #expect(hello.port == 7777)
+        #expect(hello == PhoneHello(protocol: 4, device: "Google Pixel 8", app: "1.0", session: "4f2c9a1e", port: 7777, cert: "75a342"))
         #expect(hello.summary == "Google Pixel 8 · session 4f2c")
-        #expect(hello.cert == nil)
     }
 
-    @Test func helloOverUSBCarriesTheCertificate() {
-        let line = #"{"link":"hello","protocol":3,"session":"a","port":7777,"cert":"75a342"}"#
-        guard case .hello(let hello) = decode(line) else {
-            Issue.record("not a hello")
+    @Test func messagesAreRoutedByTheirChannelsTopic() throws {
+        let messages = try read(
+            PhoneStreamFixture.preamble(session: "a"),
+            PhoneStreamFixture.message("/events", #"{"seq":7,"tsWallMs":1700000000123,"tsMonoNs":99,"source":"body","kind":"log.info","payload":{"msg":"hi"}}"#),
+            PhoneStreamFixture.message("/link/pong", #"{"ping":42}"#),
+            // Not shown yet: skipped, whatever its bytes.
+            PhoneStreamFixture.message("/camera/video", Data([0x0A, 0x00, 0xFF])),
+        )
+        #expect(messages.count == 3)
+        guard messages.count == 3, case .event(let event) = messages[1] else {
+            Issue.record("no event: \(messages)")
             return
         }
-        #expect(hello.cert == "75a342")
+        #expect(event.seq == 7 && event.source == "body" && event.message == "hi")
+        #expect(messages[2] == .pong(42))
     }
 
-    @Test func authRefusal() {
-        #expect(decode(#"{"link":"auth","ok":false,"reason":"unpaired"}"#) == .auth(ok: false, reason: "unpaired"))
-        #expect(decode(#"{"link":"auth"}"#) == nil)
-    }
-
-    @Test func pongLine() {
-        #expect(decode(#"{"link":"pong","ping":42}"#) == .pong(42))
-        #expect(decode(#"{"link":"pong"}"#) == nil)
-    }
-
-    @Test func unknownLinkLineIsNotAnEvent() {
-        #expect(decode(#"{"link":"bye"}"#) == .otherLink("bye"))
-    }
-
-    @Test func eventLine() {
-        let line = #"{"seq":7,"tsWallMs":1700000000123,"tsMonoNs":99,"source":"body","kind":"log.info","payload":{"msg":"hi"}}"#
-        guard case .event(let event) = decode(line) else {
-            Issue.record("not an event")
-            return
+    @Test func recordsSplitAcrossReadsAreJoined() throws {
+        let bytes = PhoneStreamFixture.preamble(session: "a") + PhoneStreamFixture.message("/link/pong", #"{"ping":1}"#)
+        var stream = PhoneStream()
+        var messages: [PhoneMessage] = []
+        for i in stride(from: 0, to: bytes.count, by: 7) {
+            messages += try stream.append(bytes.subdata(in: i..<min(i + 7, bytes.count)))
         }
-        #expect(event.seq == 7)
-        #expect(event.source == "body")
-        #expect(event.message == "hi")
+        #expect(messages.last == .pong(1))
     }
 
-    @Test func garbage() {
-        #expect(decode("not json") == nil)
-        #expect(decode("[1,2]") == nil)
-        #expect(decode(#"{"seq":"x"}"#) == nil)
-        #expect(decode(#"{"link":"pong","ping":"x"}"#) == nil)
-        #expect(decode("") == nil)
+    @Test func undecodableMessagesAreSkippedAndTheStreamGoesOn() throws {
+        let messages = try read(
+            PhoneStreamFixture.preamble(session: "a"),
+            PhoneStreamFixture.message("/link/pong", #"{"ping":"x"}"#),
+            PhoneStreamFixture.message("/events", "not json"),
+            PhoneStreamFixture.message("/link/pong", #"{"ping":2}"#),
+        )
+        #expect(Array(messages.dropFirst()) == [.pong(2)])
     }
 
-    @Test func tcpDropsAreReadFromTheDroppedEvent() {
-        let line = #"{"seq":1,"tsWallMs":0,"tsMonoNs":0,"source":"telemetry","kind":"dropped","payload":{"queue":0,"sinks":{"tcp":12,"logcat":3}}}"#
-        guard case .event(let event) = decode(line) else {
+    @Test func otherRecordsAreSkippedAndACorruptLengthIsAnError() throws {
+        let preamble = PhoneStreamFixture.preamble(session: "a")
+        let skipped = try read(preamble, PhoneStreamFixture.record(0x0F, Data(repeating: 0, count: 5)), PhoneStreamFixture.message("/link/pong", #"{"ping":3}"#))
+        #expect(skipped.last == .pong(3))
+        let huge = Data([0x05]) + withUnsafeBytes(of: UInt64(1 << 40).littleEndian) { Data($0) }
+        #expect(throws: McapRecords.Failure.tooLarge(1 << 40)) { try read(preamble, huge) }
+    }
+
+    @Test func aRefusalIsAJsonLineInsteadOfTheStream() throws {
+        #expect(try read(Data(#"{"link":"auth","ok":false,"reason":"unpaired"}"#.utf8) + Data("\n".utf8)) == [.auth(ok: false, reason: "unpaired")])
+    }
+
+    @Test func anythingElseIsNotTelemetry() {
+        #expect(throws: (any Error).self) { try read(Data("hello, world, this is not MCAP\n".utf8)) }
+    }
+
+    @Test func tcpDropsAreReadFromTheDroppedEvent() throws {
+        let messages = try read(PhoneStreamFixture.preamble(session: "a"), PhoneStreamFixture.event(1, tcpDropped: 12))
+        guard case .event(let event)? = messages.last else {
             Issue.record("not an event")
             return
         }

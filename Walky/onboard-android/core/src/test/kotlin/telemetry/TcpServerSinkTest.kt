@@ -1,50 +1,87 @@
 package com.vadymsidorov.walky.core.telemetry
 
-import kotlinx.serialization.json.JsonNull
+import com.vadymsidorov.walky.core.telemetry.mcap.Mcap
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.Base64
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 
 class TcpServerSinkTest {
+    private val catalog = Topics.catalog
+    private val eventsId = catalog.id(Topics.Events)
+
     private fun event(seq: Long) = TelemetryEvent(seq, 1_000 + seq, seq, "test", "k$seq", JsonPrimitive(seq))
 
-    private fun connect(port: Int): Pair<Socket, BufferedReader> {
-        val socket = Socket("127.0.0.1", port).apply { soTimeout = 5_000 }
-        return socket to BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
+    private fun eventRecord(seq: Long) = StreamRecord(
+        eventsId, Topics.Events, seq,
+        Mcap.message(eventsId, seq, seq, seq, WalkyJson.encodeToString(TelemetryEvent.serializer(), event(seq)).toByteArray()),
+    )
+
+    private fun <T> record(topic: Topic<T>, sequence: Long, value: T): StreamRecord {
+        val id = catalog.id(topic)
+        return StreamRecord(id, topic, sequence, Mcap.message(id, sequence, sequence, sequence, topic.encode(value)), topic.keyframe?.invoke(value) ?: false)
     }
 
-    /** Connects and consumes the hello line every client receives first. */
-    private fun connectPastHello(port: Int): Pair<Socket, BufferedReader> {
-        val (socket, reader) = connect(port)
-        assertEquals("hello", json(reader.readLine())["link"]?.jsonPrimitive?.content)
-        return socket to reader
-    }
+    private fun Message.event() = WalkyJson.decodeFromString(TelemetryEvent.serializer(), text)
 
-    private fun json(line: String): JsonObject = WalkyJson.parseToJsonElement(line).jsonObject
+    /** A client of the MCAP stream. */
+    private inner class Client(val socket: Socket) : AutoCloseable {
+        val stream by lazy { McapStream(socket.getInputStream()) }
+        lateinit var hello: Map<String, String>
 
-    private fun Socket.send(line: String) {
-        getOutputStream().apply {
-            write((line + "\n").toByteArray(Charsets.UTF_8))
-            flush()
+        /** Header, the hello Metadata, then a Schema and a Channel for every topic. */
+        fun readPreamble(): Client {
+            val header = stream.next()
+            assertEquals(0x01, header.opcode)
+            val metadata = stream.next()
+            assertEquals(0x0C, metadata.opcode)
+            val r = metadata.reader()
+            assertEquals("hello", r.string())
+            hello = r.stringMap()
+            val schemas = List(catalog.topics.size) { stream.next() }
+            assertEquals(List(catalog.topics.size) { 0x03 }, schemas.map { it.opcode })
+            val channels = List(catalog.topics.size) { stream.next() }
+            assertEquals(List(catalog.topics.size) { 0x04 }, channels.map { it.opcode })
+            val topics = channels.map { it.reader().run { u16(); u16(); string() } }
+            assertEquals(catalog.topics.map { it.name }, topics)
+            return this
         }
+
+        fun message(): Message = stream.next().message()
+
+        fun send(line: String) {
+            socket.getOutputStream().apply {
+                write((line + "\n").toByteArray(Charsets.UTF_8))
+                flush()
+            }
+        }
+
+        fun assertNothingMore() {
+            socket.soTimeout = 200
+            assertTrue(runCatching { socket.getInputStream().read() }.exceptionOrNull() is SocketTimeoutException)
+            socket.soTimeout = 5_000
+        }
+
+        override fun close() = socket.close()
     }
+
+    private fun connect(port: Int) = Client(Socket("127.0.0.1", port).apply { soTimeout = 5_000 })
 
     private fun awaitClients(sink: TcpServerSink, count: Int) {
         val deadline = System.currentTimeMillis() + 5_000
@@ -53,24 +90,52 @@ class TcpServerSinkTest {
     }
 
     @Test
-    fun streamsJsonLinesAndReplaysRecentEventsToNewClients() {
+    fun streamsMcapAndReplaysRecentEventsToNewClients() {
         val sink = TcpServerSink(port = 0, replayEvents = 2)
         try {
-            sink.write(listOf(event(1), event(2), event(3)))
+            listOf(1L, 2L, 3L).forEach { sink.write(eventRecord(it)) }
             val port = sink.status.value.port
             assertNotNull(port)
 
-            val (socket, reader) = connectPastHello(port!!)
-            awaitClients(sink, 1)
-            assertEquals(event(2), WalkyJson.decodeFromString(TelemetryEvent.serializer(), reader.readLine()))
-            assertEquals(event(3), WalkyJson.decodeFromString(TelemetryEvent.serializer(), reader.readLine()))
-
-            sink.write(listOf(event(4)))
-            assertEquals(event(4), WalkyJson.decodeFromString(TelemetryEvent.serializer(), reader.readLine()))
-
-            socket.close()
+            val client = connect(port!!).readPreamble()
+            client.use {
+                awaitClients(sink, 1)
+                assertEquals(event(2), client.message().event())
+                assertEquals(event(3), client.message().event())
+                sink.write(eventRecord(4))
+                val live = client.message()
+                assertEquals(event(4), live.event())
+                assertEquals(eventsId to 4L, live.channelId to live.logTime)
+            }
             awaitClients(sink, 0)
             assertEquals(0L, sink.takeDropped())
+        } finally {
+            sink.close()
+        }
+    }
+
+    @Test
+    fun preambleThenReplayedEventsThenTheLatestOfEachLatchedTopic() {
+        val sink = TcpServerSink(port = 0, hello = { mapOf("device" to "Test Phone") }, session = "s-1")
+        try {
+            sink.write(record(Topics.BodyLink, 1, BodyLinkMessage("connecting")))
+            sink.write(eventRecord(1))
+            sink.write(record(Topics.BodyLink, 2, BodyLinkMessage("connected", rttMs = 12)))
+            sink.write(record(Topics.ImuAccel, 1, ImuBatch(3, longArrayOf(1), floatArrayOf(0f), floatArrayOf(0f), floatArrayOf(9.8f))))
+            val port = sink.status.value.port!!
+            connect(port).use { client ->
+                client.readPreamble()
+                assertEquals(
+                    mapOf("protocol" to "4", "device" to "Test Phone", "session" to "s-1", "port" to port.toString()),
+                    client.hello,
+                )
+                assertEquals(event(1), client.message().event())
+                val latched = client.message()
+                assertEquals(catalog.id(Topics.BodyLink), latched.channelId)
+                assertEquals("""{"phase":"connected","rttMs":12}""", latched.text)
+                // The IMU batch is neither an event nor latched.
+                client.assertNothingMore()
+            }
         } finally {
             sink.close()
         }
@@ -81,79 +146,50 @@ class TcpServerSinkTest {
         val first = TcpServerSink(port = 0)
         first.start()
         val port = first.status.value.port!!
-        val (socket, reader) = connectPastHello(port)
+        val client = connect(port).readPreamble()
         try {
             awaitClients(first, 1)
             first.close()
-            assertEquals(null, reader.readLine())
-            // A late telemetry worker must not reopen the closed session.
-            first.write(listOf(event(1)))
+            assertNull(client.stream.nextOrNull())
+            // A late telemetry write must not reopen the closed session.
+            first.write(eventRecord(1))
             val next = TcpServerSink(port = port)
             try {
                 next.start()
                 assertEquals(null, next.status.value.error)
-                val (newSocket, newReader) = connectPastHello(port)
-                newSocket.use {
+                connect(port).use { newClient ->
+                    newClient.readPreamble()
                     awaitClients(next, 1)
-                    next.write(listOf(event(2)))
-                    assertEquals(event(2), WalkyJson.decodeFromString(TelemetryEvent.serializer(), newReader.readLine()))
+                    next.write(eventRecord(2))
+                    assertEquals(event(2), newClient.message().event())
                 }
             } finally {
                 next.close()
             }
         } finally {
-            socket.close()
+            client.close()
             first.close()
         }
     }
 
     @Test
-    fun helloIsTheFirstLineBeforeTheReplay() {
-        val sink = TcpServerSink(port = 0, hello = { buildJsonObject { put("device", "Test Phone") } })
-        try {
-            sink.write(listOf(event(1)))
-            val port = sink.status.value.port!!
-            val (socket, reader) = connect(port)
-            socket.use {
-                val hello = json(reader.readLine())
-                assertEquals("hello", hello["link"]?.jsonPrimitive?.content)
-                assertEquals(TcpServerSink.PROTOCOL.toString(), hello["protocol"]?.jsonPrimitive?.content)
-                assertEquals("Test Phone", hello["device"]?.jsonPrimitive?.content)
-                assertEquals(port.toString(), hello["port"]?.jsonPrimitive?.content)
-                assertFalse(hello.containsKey("seq"))
-                val session = hello["session"]?.jsonPrimitive?.content
-                assertTrue(!session.isNullOrEmpty())
-                assertEquals(event(1), WalkyJson.decodeFromString(TelemetryEvent.serializer(), reader.readLine()))
-
-                // Every client of one sink sees the same session.
-                val (other, otherReader) = connect(port)
-                other.use { assertEquals(session, json(otherReader.readLine())["session"]?.jsonPrimitive?.content) }
-            }
-        } finally {
-            sink.close()
-        }
-    }
-
-    @Test
-    fun pingIsAnsweredToTheSenderOnly() {
+    fun pingIsAnsweredOnThePongChannelToTheSenderOnly() {
         val sink = TcpServerSink(port = 0)
         try {
             sink.start()
             val port = sink.status.value.port!!
-            val (pinger, pingerReader) = connectPastHello(port)
-            val (other, otherReader) = connectPastHello(port)
-            pinger.use {
-                other.use {
+            connect(port).readPreamble().use { pinger ->
+                connect(port).readPreamble().use { other ->
                     awaitClients(sink, 2)
                     pinger.send("""{"ping":42}""")
-                    val pong = json(pingerReader.readLine())
-                    assertEquals("pong", pong["link"]?.jsonPrimitive?.content)
-                    assertEquals("42", pong["ping"]?.jsonPrimitive?.content)
+                    val pong = pinger.message()
+                    assertEquals(catalog.id(Topics.Pong), pong.channelId)
+                    assertEquals("""{"ping":42}""", pong.text)
 
                     // The other client gets the next event, not the pong.
-                    sink.write(listOf(event(7)))
-                    assertEquals(event(7), WalkyJson.decodeFromString(TelemetryEvent.serializer(), otherReader.readLine()))
-                    assertEquals(event(7), WalkyJson.decodeFromString(TelemetryEvent.serializer(), pingerReader.readLine()))
+                    sink.write(eventRecord(7))
+                    assertEquals(event(7), other.message().event())
+                    assertEquals(event(7), pinger.message().event())
                 }
             }
         } finally {
@@ -162,31 +198,18 @@ class TcpServerSinkTest {
     }
 
     @Test
-    fun otherClientLinesGoToOnLineAndSendReachesOnlyConnectedClients() {
-        val received = java.util.concurrent.LinkedBlockingQueue<JsonObject>()
+    fun otherClientLinesGoToOnLine() {
+        val received = LinkedBlockingQueue<JsonObject>()
         val sink = TcpServerSink(port = 0, onLine = { received += it })
         try {
             sink.start()
-            val port = sink.status.value.port!!
-            val (socket, reader) = connectPastHello(port)
-            socket.use {
+            connect(sink.status.value.port!!).readPreamble().use { client ->
                 awaitClients(sink, 1)
-                socket.send("""{"ping":1}""")
-                socket.send("""{"link":"body","legs":[1,2]}""")
-                socket.send("[1,2]")
-                assertEquals("pong", json(reader.readLine())["link"]?.jsonPrimitive?.content)
-                assertEquals(json("""{"link":"body","legs":[1,2]}"""), received.poll(5, java.util.concurrent.TimeUnit.SECONDS))
-
-                sink.send(buildJsonObject { put("link", "body"); put("phase", "connected") })
-                assertEquals(json("""{"link":"body","phase":"connected"}"""), json(reader.readLine()))
-            }
-            // A later client gets the hello and the telemetry replay, not the line sent before it connected.
-            sink.write(listOf(event(1)))
-            val (later, laterReader) = connectPastHello(port)
-            later.use {
-                assertEquals(event(1), WalkyJson.decodeFromString(TelemetryEvent.serializer(), laterReader.readLine()))
-                later.soTimeout = 200
-                assertTrue(runCatching { laterReader.readLine() }.exceptionOrNull() is SocketTimeoutException)
+                client.send("""{"ping":1}""")
+                client.send("""{"link":"body","legs":[1,2]}""")
+                client.send("[1,2]")
+                assertEquals(catalog.id(Topics.Pong), client.message().channelId)
+                assertEquals(json("""{"link":"body","legs":[1,2]}"""), received.poll(5, TimeUnit.SECONDS))
             }
             assertEquals(null, received.poll())
         } finally {
@@ -199,23 +222,85 @@ class TcpServerSinkTest {
         val sink = TcpServerSink(port = 0)
         try {
             sink.start()
-            val port = sink.status.value.port!!
-            val (socket, reader) = connectPastHello(port)
-            socket.use {
+            connect(sink.status.value.port!!).readPreamble().use { client ->
                 awaitClients(sink, 1)
-                socket.send("not json")
-                socket.send("""{"ping":"x"}""")
-                socket.send("[1,2]")
+                client.send("not json")
+                client.send("""{"ping":"x"}""")
+                client.send("[1,2]")
                 // Over the 1 KB cap: ignored even though it would parse as a ping.
-                socket.send("""{"ping":1,"pad":"${"x".repeat(TcpServerSink.MAX_CLIENT_LINE_BYTES)}"}""")
-                socket.send("""{"ping":2}""")
-                assertEquals("2", json(reader.readLine())["ping"]?.jsonPrimitive?.content)
+                client.send("""{"ping":1,"pad":"${"x".repeat(TcpServerSink.MAX_CLIENT_LINE_BYTES)}"}""")
+                client.send("""{"ping":2}""")
+                assertEquals("""{"ping":2}""", client.message().text)
                 assertEquals(1, sink.status.value.clients)
 
-                sink.write(listOf(event(3)))
-                assertEquals(event(3), WalkyJson.decodeFromString(TelemetryEvent.serializer(), reader.readLine()))
-                socket.soTimeout = 200
-                assertTrue(runCatching { reader.readLine() }.exceptionOrNull() is SocketTimeoutException)
+                sink.write(eventRecord(3))
+                assertEquals(event(3), client.message().event())
+                client.assertNothingMore()
+            }
+        } finally {
+            sink.close()
+        }
+    }
+
+    @Test
+    fun underBackpressureVideoIsDroppedUntilAKeyframeWhileEventsSurvive() {
+        val keyframeRequests = AtomicInteger()
+        val sink = TcpServerSink(port = 0, clientQueueBytes = 256 shl 10, requestKeyframe = { keyframeRequests.incrementAndGet() })
+        try {
+            sink.start()
+            val socket = Socket().apply {
+                receiveBufferSize = 4096
+                soTimeout = 5_000
+                connect(InetSocketAddress("127.0.0.1", sink.status.value.port!!))
+            }
+            Client(socket).use { client ->
+                awaitClients(sink, 1)
+                val frame = ByteArray(32 shl 10)
+                val keyframes = (0L until 300L step 30).toSet()
+                // A delta frame before any keyframe: a new client cannot decode it.
+                sink.write(record(Topics.CameraVideo, 1_000, VideoFrame(0, frame, keyframe = false, frameId = "cam")))
+                for (i in 0L until 300L) {
+                    sink.write(record(Topics.CameraVideo, i, VideoFrame(i, frame, keyframe = i in keyframes, frameId = "cam")))
+                    sink.write(eventRecord(i + 1))
+                }
+                // Only now does the client start reading.
+                client.readPreamble()
+                val events = mutableListOf<Long>()
+                val video = mutableListOf<Long>()
+                while (events.lastOrNull() != 300L) {
+                    val message = client.message()
+                    when (message.channelId) {
+                        eventsId -> events += message.event().seq
+                        catalog.id(Topics.CameraVideo) -> video += message.sequence
+                    }
+                }
+                assertEquals((1L..300L).toList(), events)
+                assertTrue("some video was dropped: ${video.size}", video.size < 300)
+                assertTrue("the first frame is a keyframe: $video", video.first() in keyframes)
+                video.zipWithNext().filter { (a, b) -> b != a + 1 }.forEach { (_, resumed) ->
+                    assertTrue("video resumes at a keyframe, not $resumed", resumed in keyframes)
+                }
+                assertTrue(sink.takeDropped() >= 300 - video.size)
+                assertTrue("joining and skipping ask for keyframes", keyframeRequests.get() >= 2)
+            }
+        } finally {
+            sink.close()
+        }
+    }
+
+    @Test
+    fun aNewClientStartsVideoAtAKeyframeWithoutCountingTheFramesBeforeAsDrops() {
+        val sink = TcpServerSink(port = 0)
+        try {
+            sink.start()
+            connect(sink.status.value.port!!).readPreamble().use { client ->
+                awaitClients(sink, 1)
+                val frame = ByteArray(100)
+                listOf(false, false, true, false).forEachIndexed { i, keyframe ->
+                    sink.write(record(Topics.CameraVideo, i.toLong(), VideoFrame(i.toLong(), frame, keyframe, "cam")))
+                }
+                assertEquals(listOf(2L, 3L), List(2) { client.message().sequence })
+                assertEquals(0L, sink.takeDropped())
             }
         } finally {
             sink.close()
@@ -227,9 +312,8 @@ class TcpServerSinkTest {
         val first = TcpServerSink(port = 0)
         try {
             first.start()
-            val taken = first.status.value.port!!
-            val second = TcpServerSink(port = taken)
-            second.write(listOf(TelemetryEvent(1, 0, 0, "s", "k", JsonNull)))
+            val second = TcpServerSink(port = first.status.value.port!!)
+            second.write(eventRecord(1))
             assertTrue(second.status.value.error.orEmpty(), second.status.value.error != null)
             second.close()
         } finally {
@@ -250,43 +334,37 @@ class TcpServerSinkTest {
 
     private val relayKey = ByteArray(TcpServerSink.KEY_BYTES) { it.toByte() }
     private fun auth(key: ByteArray) = """{"link":"auth","key":"${Base64.getEncoder().encodeToString(key)}"}"""
-
-    private fun Socket.assertSilent() {
-        soTimeout = 300
-        assertTrue(runCatching { getInputStream().read() }.exceptionOrNull() is SocketTimeoutException)
-        soTimeout = 5_000
-    }
+    private fun json(line: String): JsonObject = WalkyJson.parseToJsonElement(line).jsonObject
+    private fun Socket.lines() = BufferedReader(InputStreamReader(getInputStream(), Charsets.UTF_8))
 
     @Test
     fun wifiClientGetsNothingUntilItPresentsTheKeyThenTheFullStream() {
         val received = LinkedBlockingQueue<JsonObject>()
         val sink = TcpServerSink(port = 0, replayEvents = 1, onLine = { received += it }, wifi = FakeWifi(relayKey))
         try {
-            sink.write(listOf(event(1)))
+            sink.write(eventRecord(1))
             val wifiPort = sink.status.value.wifiPort!!
-            val (early, earlyReader) = connect(wifiPort)
-            early.use {
-                early.assertSilent()
-                // A leg command in place of the key is refused, not acted on.
+            connect(wifiPort).use { early ->
+                early.assertNothingMore()
+                // A leg command in place of the key is refused, as a JSON line, not acted on.
                 early.send("""{"link":"body","legs":[10,20]}""")
-                assertEquals("denied", json(earlyReader.readLine())["reason"]?.jsonPrimitive?.content)
-                assertEquals(null, earlyReader.readLine())
+                val reader = early.socket.lines()
+                assertEquals("denied", json(reader.readLine())["reason"].toString().trim('"'))
+                assertEquals(null, reader.readLine())
             }
             assertEquals(0, sink.status.value.clients)
 
-            val (socket, reader) = connect(wifiPort)
-            socket.use {
-                socket.send(auth(relayKey))
-                val hello = json(reader.readLine())
-                assertEquals("hello", hello["link"]?.jsonPrimitive?.content)
-                assertEquals(wifiPort.toString(), hello["port"]?.jsonPrimitive?.content)
-                assertFalse(hello.containsKey("cert"))
-                assertEquals(event(1), WalkyJson.decodeFromString(TelemetryEvent.serializer(), reader.readLine()))
+            connect(wifiPort).use { client ->
+                client.send(auth(relayKey))
+                client.readPreamble()
+                assertEquals(wifiPort.toString(), client.hello["port"])
+                assertFalse(client.hello.containsKey("cert"))
+                assertEquals(event(1), client.message().event())
                 awaitClients(sink, 1)
-                sink.write(listOf(event(2)))
-                assertEquals(event(2), WalkyJson.decodeFromString(TelemetryEvent.serializer(), reader.readLine()))
+                sink.write(eventRecord(2))
+                assertEquals(event(2), client.message().event())
 
-                socket.send("""{"link":"body","limp":true}""")
+                client.send("""{"link":"body","limp":true}""")
                 assertEquals(json("""{"link":"body","limp":true}"""), received.poll(5, TimeUnit.SECONDS))
             }
             // The leg command sent before admission never arrived.
@@ -297,14 +375,14 @@ class TcpServerSinkTest {
     }
 
     @Test
-    fun wifiClientWithAWrongKeyOrNoStoredKeyIsRefusedAndClosed() {
+    fun wifiClientWithAWrongKeyOrNoStoredKeyIsRefusedWithAJsonLineAndClosed() {
         for ((stored, reason) in listOf(relayKey to "denied", null to "unpaired")) {
             val sink = TcpServerSink(port = 0, wifi = FakeWifi(stored))
             try {
                 sink.start()
-                val (socket, reader) = connect(sink.status.value.wifiPort!!)
-                socket.use {
-                    socket.send(auth(ByteArray(TcpServerSink.KEY_BYTES) { 7 }))
+                connect(sink.status.value.wifiPort!!).use { client ->
+                    client.send(auth(ByteArray(TcpServerSink.KEY_BYTES) { 7 }))
+                    val reader = client.socket.lines()
                     assertEquals(json("""{"link":"auth","ok":false,"reason":"$reason"}"""), json(reader.readLine()))
                     assertEquals(null, reader.readLine())
                 }
@@ -322,23 +400,21 @@ class TcpServerSinkTest {
         val sink = TcpServerSink(port = 0, onLine = { received += it }, wifi = wifi)
         try {
             sink.start()
-            val (usb, usbReader) = connect(sink.status.value.port!!)
-            usb.use {
-                assertEquals("ab12", json(usbReader.readLine())["cert"]?.jsonPrimitive?.content)
+            connect(sink.status.value.port!!).readPreamble().use { usb ->
+                assertEquals("ab12", usb.hello["cert"])
                 usb.send("""{"link":"key","key":"${Base64.getEncoder().encodeToString(relayKey)}"}""")
                 usb.send("""{"ping":1}""")
-                assertEquals("pong", json(usbReader.readLine())["link"]?.jsonPrimitive?.content)
+                assertEquals(catalog.id(Topics.Pong), usb.message().channelId)
                 assertTrue(relayKey.contentEquals(wifi.stored))
             }
 
-            val (remote, remoteReader) = connect(sink.status.value.wifiPort!!)
-            remote.use {
+            connect(sink.status.value.wifiPort!!).use { remote ->
                 remote.send(auth(relayKey))
-                assertEquals("hello", json(remoteReader.readLine())["link"]?.jsonPrimitive?.content)
+                remote.readPreamble()
                 val other = ByteArray(TcpServerSink.KEY_BYTES) { 9 }
                 remote.send("""{"link":"key","key":"${Base64.getEncoder().encodeToString(other)}"}""")
                 remote.send("""{"ping":2}""")
-                assertEquals("pong", json(remoteReader.readLine())["link"]?.jsonPrimitive?.content)
+                assertEquals(catalog.id(Topics.Pong), remote.message().channelId)
                 assertTrue(relayKey.contentEquals(wifi.stored))
             }
             // Neither key line is a body command.
@@ -353,10 +429,9 @@ class TcpServerSinkTest {
         val sink = TcpServerSink(port = 0, wifi = FakeWifi(relayKey))
         try {
             sink.start()
-            val (socket, reader) = connect(sink.status.value.wifiPort!!)
-            socket.use {
-                socket.soTimeout = TcpServerSink.AUTH_TIMEOUT_MS + 2_000
-                assertEquals(null, reader.readLine())
+            connect(sink.status.value.wifiPort!!).use { client ->
+                client.socket.soTimeout = TcpServerSink.AUTH_TIMEOUT_MS + 2_000
+                assertEquals(-1, client.socket.getInputStream().read())
             }
         } finally {
             sink.close()

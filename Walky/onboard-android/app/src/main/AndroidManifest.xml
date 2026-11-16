@@ -4,7 +4,11 @@
 
     <!-- Hearing: on-device speech recognition. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <!-- Telemetry: the app serves JSON lines over TCP to the workstation. -->
+    <!-- Recording: front camera video. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Recording: raw IMU above the 200 Hz cap. -->
+    <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
+    <!-- Telemetry: the app streams MCAP over TCP to Relay. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Body link: the phone joins the Pico's own Wi-Fi network as a second, local-only connection. -->
     <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />

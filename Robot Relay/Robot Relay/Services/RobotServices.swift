@@ -54,7 +54,7 @@ protocol RobotLinkService: AnyObject {
     func clearActivity() async
 }
 
-/// Telemetry events from onboard-android (NDJSON over TCP :7777).
+/// Telemetry events from onboard-android (the `/events` channel, TCP :7777).
 protocol TelemetryService: AnyObject {
     /// Buffered events followed by live ones, in `seq` order.
     func events() -> AsyncStream<TelemetryEvent>

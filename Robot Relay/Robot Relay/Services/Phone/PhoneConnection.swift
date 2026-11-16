@@ -3,15 +3,15 @@ import Foundation
 import Network
 import os
 
-/// The link to onboard-android's telemetry server (`TcpServerSink`, NDJSON): over USB through
-/// `adb forward` to its loopback listener, or over Wi-Fi to its TLS listener.
+/// The link to onboard-android's telemetry server (`TcpServerSink`, read by `PhoneStream`):
+/// over USB through `adb forward` to its loopback listener, or over Wi-Fi to its TLS listener.
 ///
 /// Each attempt asks `route` where to dial. Once a connection opens (the USB tunnel, or TLS
 /// on Wi-Fi) failures don't count: the phone is there, and its app may stay paused for a
 /// while, for example behind Android's Wi-Fi approval dialog that the pairing sent on hello
 /// brings up, so Relay retries every 3 s. After `maxAttempts` attempts in a row that open
 /// nothing, or when the phone refuses Relay's key or shows another certificate, it stops and
-/// waits for `routeAppeared()` or another `connect`. Each connection starts with a hello line
+/// waits for `routeAppeared()` or another `connect`. Each connection starts with a hello
 /// and a replay of recent events; replayed events already seen in the same session are
 /// skipped, so the event stream has no duplicates.
 final class PhoneConnection {
@@ -50,7 +50,7 @@ final class PhoneConnection {
     static let usbPort: UInt16 = 7777
     static let pingInterval: Duration = .seconds(2)
     static let maxAttempts = 4
-    /// The phone sends a body report at least every second; this long without a byte, the link is gone.
+    /// The phone reports its system status every second; this long without a byte, the link is gone.
     static let silenceLimit: Duration = .seconds(6)
     static let pairHint = "Connect the phone over USB once to pair"
 
@@ -85,7 +85,7 @@ final class PhoneConnection {
     private var opened = false
     private var certificateRejected = false
     private var lastReceived = ContinuousClock.now
-    private var framer = LineFramer()
+    private var stream = PhoneStream()
     private var dedupe = SeqDedupe()
     private var sawHello = false
     private var sawEvent = false
@@ -196,10 +196,7 @@ final class PhoneConnection {
         status.route = target.route
         opened = false
         certificateRejected = false
-        framer = LineFramer()
-        sawHello = false
-        sawEvent = false
-        pingsInFlight = [:]
+        startStream()
         status.state = .connecting
         report(connectText, .running)
 
@@ -246,15 +243,13 @@ final class PhoneConnection {
 
     private func receive() {
         let current = generation
-        connection?.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
+        connection?.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { [weak self] data, _, isComplete, error in
             MainActor.assumeIsolated {
                 guard let self, self.generation == current else { return }
                 if let data, !data.isEmpty {
                     self.lastReceived = .now
-                    for line in self.framer.append(data) {
-                        self.handle(line: line)
-                        guard self.generation == current else { return }
-                    }
+                    self.handle(data: data)
+                    guard self.generation == current else { return }
                 }
                 if let error {
                     self.lost(Self.describe(error))
@@ -341,11 +336,35 @@ final class PhoneConnection {
         connection = nil
     }
 
-    // MARK: Lines
+    // MARK: Messages
 
-    /// Handles one line from the phone. Internal so tests can feed lines without a socket.
-    func handle(line: Data) {
-        switch PhoneLine.decode(line) {
+    /// Forgets the previous connection's stream; the phone starts over on every connection.
+    func startStream() {
+        stream = PhoneStream()
+        sawHello = false
+        sawEvent = false
+        pingsInFlight = [:]
+    }
+
+    /// Handles bytes from the phone. Internal so tests can feed a stream without a socket.
+    func handle(data: Data) {
+        let current = generation
+        let messages: [PhoneMessage]
+        do {
+            messages = try stream.append(data)
+        } catch {
+            Logger.phone.error("phone: unreadable telemetry stream: \(String(describing: error), privacy: .public)")
+            lost("Unreadable telemetry from Walky")
+            return
+        }
+        for message in messages {
+            handle(message)
+            guard generation == current else { return }
+        }
+    }
+
+    private func handle(_ message: PhoneMessage) {
+        switch message {
         case .hello(let hello):
             status.state = .connected
             sawHello = true
@@ -366,7 +385,7 @@ final class PhoneConnection {
             status.state = .connected
             if !sawEvent {
                 sawEvent = true
-                // A server without hello lines: a new connection may be a new session.
+                // A server without a hello: a new connection may be a new session.
                 if !sawHello, dedupe.begin(session: nil) { status.dropped = 0 }
             }
             guard dedupe.admit(event.seq) else { return }
@@ -379,10 +398,6 @@ final class PhoneConnection {
         case .auth(let ok, let reason):
             guard !ok else { return }
             refused(reason == "unpaired" ? "Walky has no key from Relay" : "Walky refused Relay’s key")
-        case .otherLink:
-            break
-        case nil:
-            Logger.phone.error("phone: dropped undecodable line (\(line.count, privacy: .public) bytes): \(String(decoding: line.prefix(200), as: UTF8.self))")
         }
     }
 
@@ -468,57 +483,6 @@ final class PhoneConnection {
         case .dns: "unknown host"
         case .tls: "TLS failed"
         default: error.localizedDescription
-        }
-    }
-}
-
-/// The phone's first line on every connection.
-nonisolated struct PhoneHello: Decodable, Equatable, Sendable {
-    var `protocol`: Int?
-    var device: String?
-    var app: String?
-    var session: String?
-    var port: Int?
-    /// SHA-256 of the certificate on the phone's Wi-Fi listener, lowercase hex; sent on USB only.
-    var cert: String?
-
-    /// `Google Pixel 8 · session 4f2c`
-    var summary: String {
-        [device, session.map { "session " + $0.prefix(4) }].compactMap { $0 }.joined(separator: " · ")
-    }
-}
-
-/// One NDJSON line from the phone. Lines with a `link` key concern this client only.
-nonisolated enum PhoneLine: Equatable, Sendable {
-    case hello(PhoneHello)
-    case pong(Int64)
-    case event(TelemetryEvent)
-    case body(BodyLink)
-    /// The Wi-Fi listener's answer to Relay's key; it only ever sends refusals.
-    case auth(ok: Bool, reason: String?)
-    case otherLink(String)
-
-    private struct Probe: Decodable {
-        var link: String?
-        var ping: Int64?
-    }
-
-    private struct Auth: Decodable {
-        var ok: Bool
-        var reason: String?
-    }
-
-    /// nil for anything that is neither a link line nor a telemetry event.
-    static func decode(_ line: Data) -> PhoneLine? {
-        let decoder = JSONDecoder()
-        guard let probe = try? decoder.decode(Probe.self, from: line) else { return nil }
-        switch probe.link {
-        case "hello": return (try? decoder.decode(PhoneHello.self, from: line)).map(PhoneLine.hello)
-        case "pong": return probe.ping.map(PhoneLine.pong)
-        case "body": return (try? decoder.decode(BodyLink.self, from: line)).map(PhoneLine.body)
-        case "auth": return (try? decoder.decode(Auth.self, from: line)).map { .auth(ok: $0.ok, reason: $0.reason) }
-        case let link?: return .otherLink(link)
-        case nil: return (try? decoder.decode(TelemetryEvent.self, from: line)).map(PhoneLine.event)
         }
     }
 }

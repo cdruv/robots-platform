@@ -2,7 +2,9 @@ package com.vadymsidorov.walky.core.body
 
 import com.vadymsidorov.walky.core.output.LegTargets
 import com.vadymsidorov.walky.core.output.Legs
-import com.vadymsidorov.walky.core.telemetry.Logger
+import com.vadymsidorov.walky.core.telemetry.Telemetry
+import com.vadymsidorov.walky.core.telemetry.Topics
+import com.vadymsidorov.walky.core.telemetry.WalkyJson
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,13 +30,19 @@ import java.net.SocketTimeoutException
  * called again, with backoff, whenever the link is down.
  *
  * Commands given while the link is down are dropped, never replayed after a reconnect.
+ * Every command line sent, except pings, is recorded on `/body/command` and every state line
+ * received on `/body/state`, both as they went over the wire.
  */
 class PicoBody(
     private val connect: suspend () -> Socket,
     private val scope: CoroutineScope,
-    private val logger: Logger,
+    telemetry: Telemetry,
     private val monoMs: () -> Long = { System.nanoTime() / 1_000_000 },
 ) : Legs {
+    private val logger = telemetry.logger("body")
+    private val commands = telemetry.channel(Topics.BodyCommand)
+    private val states = telemetry.channel(Topics.BodyState)
+
     private val current = MutableStateFlow(BodyLink())
     override val state: StateFlow<BodyLink> = current.asStateFlow()
 
@@ -136,6 +144,7 @@ class PicoBody(
         while (true) {
             val line = reader.readLine() ?: throw IOException("closed by the Pico")
             val pico = BodyProtocol.decodeState(line) ?: continue
+            states.write(WalkyJson.parseToJsonElement(line))
             if (pico.v != BodyProtocol.VERSION) throw IOException("Pico speaks body v${pico.v}, this app v${BodyProtocol.VERSION}")
             val sent = pingN
             if (sent != 0L && pico.n != null && pico.n >= sent) {
@@ -161,11 +170,14 @@ class PicoBody(
                 while (true) {
                     val command = outbox.poll() ?: break
                     n++
+                    val line = BodyProtocol.line(command, n)
                     if (command == BodyCommand.Ping) {
                         pingAtMs = monoMs()
                         pingN = n
+                    } else {
+                        commands.write(line)
                     }
-                    lines.append(BodyProtocol.encode(command, n)).append('\n')
+                    lines.append(line.toString()).append('\n')
                 }
                 out.write(lines.toString().toByteArray(Charsets.UTF_8))
                 out.flush()

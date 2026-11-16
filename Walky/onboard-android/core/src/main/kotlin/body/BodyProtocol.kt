@@ -22,7 +22,9 @@ object BodyProtocol {
     const val PORT = 8765
     const val VERSION = 1
 
-    fun encode(command: BodyCommand, n: Long): String = buildJsonObject {
+    fun encode(command: BodyCommand, n: Long): String = line(command, n).toString()
+
+    fun line(command: BodyCommand, n: Long): JsonObject = buildJsonObject {
         when (command) {
             is BodyCommand.Drive -> {
                 put("t", "legs")
@@ -38,7 +40,7 @@ object BodyProtocol {
             BodyCommand.Ping -> put("t", "ping")
         }
         put("n", n)
-    }.toString()
+    }
 
     /** The state in [line], or null if the line is something else. Throws on a malformed state. */
     fun decodeState(line: String): PicoState? {

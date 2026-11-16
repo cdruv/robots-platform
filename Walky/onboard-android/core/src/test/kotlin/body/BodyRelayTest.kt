@@ -1,5 +1,8 @@
 package com.vadymsidorov.walky.core.body
 
+import com.vadymsidorov.walky.core.telemetry.BodyLinkMessage
+import com.vadymsidorov.walky.core.telemetry.FakeTelemetry
+import com.vadymsidorov.walky.core.telemetry.Topics
 import com.vadymsidorov.walky.core.telemetry.WalkyJson
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -9,8 +12,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
@@ -18,11 +19,12 @@ import java.util.concurrent.CopyOnWriteArrayList
 class BodyRelayTest {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val pico = FakePico()
-    private val body = PicoBody(pico::connect, scope, RecordingLogger())
+    private val telemetry = FakeTelemetry()
+    private val body = PicoBody(pico::connect, scope, telemetry)
     private val pairings = CopyOnWriteArrayList<Pair<String, String>>()
-    private val sent = CopyOnWriteArrayList<Pair<Long, JsonObject>>()
     private val relay = BodyRelay(body, { ssid, password -> pairings += ssid to password },
-        { sent += System.nanoTime() / 1_000_000 to it }, scope)
+        telemetry.channel(Topics.BodyLink), scope)
+    private val links get() = telemetry.values(Topics.BodyLink)
 
     private fun line(text: String) = relay.onLine(WalkyJson.parseToJsonElement(text).jsonObject)
 
@@ -70,27 +72,18 @@ class BodyRelayTest {
     }
 
     @Test
-    fun reportsTheLinkOnChangeAtMostTenTimesASecondAndAtLeastOnce() {
+    fun publishesTheLinkOnlyWhenItsPhaseOrRoundTripChanges() {
         relay.start()
-        // Not started yet, so nothing changes: only the once-a-second repeat goes out.
-        val waiting = eventually { sent.firstOrNull()?.second }
-        assertEquals("""{"link":"body","phase":"connecting"}""", waiting.toString())
-        eventually(what = "repeat") { sent.size >= 2 }
-        val gap = sent[1].first - sent[0].first
-        assertTrue("repeat after $gap ms", gap in 900..1_500)
+        assertEquals(BodyLinkMessage("connecting"), eventually { links.firstOrNull() })
+        Thread.sleep(500)
+        assertEquals("nothing changed, nothing repeated", 1, links.size)
 
         body.start()
-        val connected = eventually { sent.lastOrNull()?.second?.takeIf { "pico" in it } }
-        assertEquals("\"connected\"", connected["phase"].toString())
-        assertEquals("e66118604b", WalkyJson.decodeFromJsonElement(PicoState.serializer(), connected["pico"]!!).board)
-        assertFalse("explicit nulls are left out", "error" in connected["pico"]!!.jsonObject)
-
-        // The Pico's state changes 10 times a second; Relay must not get more than that.
-        val from = sent.size
-        Thread.sleep(1_000)
-        val times = sent.drop(from).map { it.first }
-        assertTrue("${times.size} lines in a second", times.size in 5..11)
-        assertTrue(times.zipWithNext { a, b -> b - a }.all { it >= 95 })
-        assertNull(sent.firstOrNull { "seq" in it.second })
+        eventually(what = "connected") { links.any { it.phase == "connected" } }
+        val rtt = eventually(what = "rtt") { links.lastOrNull()?.rttMs }
+        assertTrue("rtt $rtt ms", rtt in 0..500)
+        assertTrue("no repeats: $links", links.zipWithNext().none { (a, b) -> a == b })
+        // The Pico's state lines go on their own channel, from PicoBody.
+        assertTrue(telemetry.values(Topics.BodyState).isNotEmpty())
     }
 }

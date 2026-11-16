@@ -1,23 +1,20 @@
 package com.vadymsidorov.walky.core.body
 
 import com.vadymsidorov.walky.core.output.LegTargets
-import com.vadymsidorov.walky.core.telemetry.WalkyJson
+import com.vadymsidorov.walky.core.telemetry.BodyLinkMessage
+import com.vadymsidorov.walky.core.telemetry.TelemetryChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.put
 
 /**
  * Robot Relay's route to the body. Client lines in, each one command:
@@ -28,18 +25,17 @@ import kotlinx.serialization.json.put
  *     {"link":"body","save":true}
  *     {"link":"pair","ssid":"…","password":"…"}
  *
- * and one line out when the link changes, at most 10 and at least once a second:
+ * Relay sends leg targets as a stream and each line is forwarded once, so a Relay that stops
+ * also stops the legs. Lines that do not fit are ignored.
  *
- *     {"link":"body","phase":"…","pico":{…},"rttMs":12}
- *
- * `pico` is the Pico's state line as received and is absent unless connected. Relay sends
- * leg targets as a stream and each line is forwarded once, so a Relay that stops also stops
- * the legs. Lines that do not fit are ignored.
+ * Out, the link's phase and RTT go on `/body/link` ([BodyLinkMessage]) within
+ * [CHECK_INTERVAL_MS] of each change; the Pico's state lines are on `/body/state` from
+ * [PicoBody]. Both are latched, so a client that joins later gets the latest of each.
  */
 class BodyRelay(
     private val body: PicoBody,
     private val pair: (ssid: String, password: String) -> Unit,
-    private val send: (JsonObject) -> Unit,
+    private val link: TelemetryChannel<BodyLinkMessage>,
     private val scope: CoroutineScope,
     /** What to report as `phase`; the app names what it is waiting for while not connected. */
     private val phase: (BodyLink) -> String = { it.phase.name.lowercase() },
@@ -50,12 +46,15 @@ class BodyRelay(
     fun start() {
         if (job != null) return
         job = scope.launch {
-            var sent: BodyLink? = null
+            var sent: BodyLinkMessage? = null
             while (true) {
-                val link = withTimeoutOrNull(MAX_INTERVAL_MS) { body.state.first { it != sent } } ?: body.state.value
-                send(encode(link))
-                sent = link
-                delay(MIN_INTERVAL_MS)
+                val state = body.state.value
+                val message = BodyLinkMessage(phase(state), state.rttMs)
+                if (message != sent) {
+                    link.write(message)
+                    sent = message
+                }
+                delay(CHECK_INTERVAL_MS)
             }
         }
     }
@@ -76,13 +75,6 @@ class BodyRelay(
         }
     }
 
-    private fun encode(link: BodyLink): JsonObject = buildJsonObject {
-        put("link", "body")
-        put("phase", phase(link))
-        link.pico?.let { put("pico", WalkyJson.encodeToJsonElement(PicoState.serializer(), it)) }
-        link.rttMs?.let { put("rttMs", it) }
-    }
-
     private fun JsonObject.text(key: String): String? =
         (this[key] as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
 
@@ -96,7 +88,6 @@ class BodyRelay(
     }
 
     private companion object {
-        const val MIN_INTERVAL_MS = 100L
-        const val MAX_INTERVAL_MS = 1_000L
+        const val CHECK_INTERVAL_MS = 100L
     }
 }
