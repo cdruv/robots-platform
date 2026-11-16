@@ -16,24 +16,25 @@ nonisolated struct TelemetryEvent: Codable, Identifiable, Hashable, Sendable {
 }
 
 extension TelemetryEvent {
+    /// Whether this event is a log line; the definition is `isLog` in
+    /// `Walky/onboard-android/core/.../telemetry/Telemetry.kt`.
+    nonisolated var isLog: Bool { kind.hasPrefix("log.") }
+
     nonisolated enum Level: Sendable {
-        case debug, info, heard, warn, error
+        case info, warn, error
 
         /// Ordering used by the severity filter.
         var rank: Int {
             switch self {
-            case .debug: 0
-            case .info, .heard: 1
-            case .warn: 2
-            case .error: 3
+            case .info: 0
+            case .warn: 1
+            case .error: 2
             }
         }
 
         var label: String {
             switch self {
-            case .debug: "DEBUG"
             case .info: "INFO"
-            case .heard: "HEARD"
             case .warn: "WARN"
             case .error: "ERROR"
             }
@@ -44,35 +45,14 @@ extension TelemetryEvent {
         switch kind {
         case "log.error": .error
         case "log.warn": .warn
-        case "log.info": .info
-        case "Heard": .heard
-        case "Motion", "SystemStatus": .debug
         default: .info
         }
     }
 
-    /// One-line presentation for the stream.
+    /// One-line presentation of a log line.
     nonisolated var message: String {
-        if let msg = payload["msg"]?.stringValue { return msg }
-        switch kind {
-        case "Motion":
-            let state = payload["state"]?.stringValue ?? "?"
-            return "Motion  \(state)  pitch \(field("pitch"))  roll \(field("roll"))  mag \(field("mag"))"
-        case "SystemStatus":
-            return "SystemStatus  battery \(field("battery"))%  thermal \(field("thermal"))"
-        case "Heard":
-            return "HEARD  “\(payload["text"]?.stringValue ?? "")”"
-        case "SpeechStarted", "SpeechFinished":
-            return "\(kind) \(field("utteranceId"))"
-        default:
-            guard case .object(let object) = payload, !object.isEmpty else { return kind }
-            let pairs = object.keys.sorted().map { "\($0) \(object[$0]?.displayString ?? "")" }
-            return "\(kind)  \(pairs.joined(separator: "  "))"
-        }
-    }
-
-    private nonisolated func field(_ key: String) -> String {
-        payload[key]?.displayString ?? "?"
+        let text = [payload["msg"]?.stringValue, payload["error"]?.stringValue].compactMap { $0 }
+        return text.isEmpty ? payload.displayString : text.joined(separator: " — ")
     }
 }
 

@@ -26,9 +26,8 @@ struct RootView: View {
     private var detail: some View {
         switch app.selection {
         case .liveRobot: LiveRobotView()
-        case .telemetry: TelemetryView()
+        case .logs: LogsView()
         case .firmware: FirmwareView()
-        case .drive: DriveView()
         }
     }
 }

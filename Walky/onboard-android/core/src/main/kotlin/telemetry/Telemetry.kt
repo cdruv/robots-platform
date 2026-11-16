@@ -19,7 +19,13 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.util.concurrent.atomic.AtomicLong
 
-/** Structured observability: every event and log line goes through one of these. */
+/**
+ * Structured observability: every event and log line goes through one of these.
+ *
+ * A log is an event written through [logger]; [isLog] is the single definition. Log views
+ * (debug overlay, logcat, Relay's Logs tab) show only logs; everything else, such as
+ * percepts, is telemetry for the TCP stream.
+ */
 interface Telemetry {
     fun start()
     fun stop()
@@ -65,6 +71,8 @@ val WalkyJson: Json = Json {
     classDiscriminator = "type"
 }
 
+val TelemetryEvent.isLog: Boolean get() = kind.startsWith("log.")
+
 fun TelemetryEvent.toJsonLine(): String = WalkyJson.encodeToString(TelemetryEvent.serializer(), this)
 
 /**
@@ -93,6 +101,7 @@ class DefaultTelemetry(
     )
     private val workers = sinks.map { SinkWorker(it, sinkQueueCapacity) }
     private var jobs: List<Job> = emptyList()
+    private val dropLog = logger(SOURCE)
 
     /** Events lost anywhere (queue or sinks) since start. */
     val droppedTotal: Long get() = dropped.get()
@@ -154,6 +163,7 @@ class DefaultTelemetry(
                     put("queue", queued)
                     put("sinks", buildJsonObject { perSink.forEach { (name, n) -> put(name, n) } })
                 })
+                dropLog.warn("dropped events: queue=$queued" + perSink.entries.joinToString("") { ", ${it.key}=${it.value}" })
             }
         }
     }

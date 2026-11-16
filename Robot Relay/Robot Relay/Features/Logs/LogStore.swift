@@ -3,7 +3,7 @@ import Observation
 import os
 
 @Observable
-final class TelemetryStore {
+final class LogStore {
     enum Filter {
         case all, warnPlus, error
 
@@ -54,7 +54,8 @@ final class TelemetryStore {
         }
     }
 
-    var lastSeq: Int64? { events.last?.seq }
+    /// Last seq seen on the stream, including events that are not logs.
+    private(set) var lastSeq: Int64?
 
     var selectedEvent: TelemetryEvent? {
         guard let selectedSeq else { return nil }
@@ -98,17 +99,13 @@ final class TelemetryStore {
         Self.clockFormatter.string(from: event.wallDate)
     }
 
-    /// Up to two info-or-higher neighbours each side of `event`, within ±`contextWindow` seconds.
+    /// Up to two neighbours each side of `event`, within ±`contextWindow` seconds.
     func context(around event: TelemetryEvent) -> [(offset: Double, event: TelemetryEvent)] {
         guard let index = events.firstIndex(where: { $0.seq == event.seq }) else { return [] }
         let center = seconds(event)
-        func isNear(_ other: TelemetryEvent) -> Bool {
-            other.level.rank >= TelemetryEvent.Level.info.rank && abs(seconds(other) - center) <= Self.contextWindow
-        }
-        let before = events[..<index].reversed().prefix { abs(seconds($0) - center) <= Self.contextWindow }
-            .filter(isNear).prefix(2).reversed()
-        let after = events[(index + 1)...].prefix { abs(seconds($0) - center) <= Self.contextWindow }
-            .filter(isNear).prefix(2)
+        func isNear(_ other: TelemetryEvent) -> Bool { abs(seconds(other) - center) <= Self.contextWindow }
+        let before = events[..<index].reversed().prefix(while: isNear).prefix(2).reversed()
+        let after = events[(index + 1)...].prefix(while: isNear).prefix(2)
         return (Array(before) + [event] + Array(after)).map { (seconds($0) - center, $0) }
     }
 
@@ -123,14 +120,18 @@ final class TelemetryStore {
         ]).prettyPrinted()
     }
 
-    /// Adds one event from the stream. Internal so tests can feed events without a service.
+    /// Takes one event from the stream and keeps it only if it is a log. Session restart and
+    /// time origin are judged on every event, so a new phone session that opens with non-log
+    /// events still clears the old one. Internal so tests can feed events without a service.
     func ingest(_ event: TelemetryEvent) {
         // seq restarts with every phone session; ids must stay unique.
-        if let last = events.last?.seq, event.seq <= last {
-            Logger.telemetry.info("telemetry cleared: phone seq restarted (\(event.seq, privacy: .public) after \(last, privacy: .public))")
+        if let last = lastSeq, event.seq <= last {
+            Logger.telemetry.info("logs cleared: phone seq restarted (\(event.seq, privacy: .public) after \(last, privacy: .public))")
             reset()
         }
+        lastSeq = event.seq
         if originMonoNs == nil { originMonoNs = event.tsMonoNs }
+        guard event.isLog else { return }
         events.append(event)
         if passesFilter(event) { visibleEvents.append(event) }
         if events.count > Self.capacity {

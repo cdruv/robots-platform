@@ -1,6 +1,7 @@
 import Foundation
 
-/// Replays the session from the design, then keeps emitting routine events.
+/// Replays the session from the design, then keeps emitting routine events. Non-log events
+/// stand in for the stream noise the log store must ignore.
 final class PlaceholderTelemetryService: TelemetryService {
     private struct Scripted {
         var time: Double
@@ -44,9 +45,7 @@ final class PlaceholderTelemetryService: TelemetryService {
         .motion(7.008, "Tilted", pitch: 12.4, roll: 3.1, mag: 0.31),
         .log(7.420, "body", "info", "pico link re-established, RTT 38 ms"),
         .status(8.002),
-        Scripted(time: 9.611, source: "hearing", kind: "Heard", payload: .object([
-            "text": .string("are you okay"), "confidence": .number(0.91),
-        ])),
+        .log(9.611, "hearing", "info", "heard “are you okay”"),
         .log(9.640, "executive", "info", "Intent Reassure → say \"I slipped. Resetting.\""),
         Scripted(time: 9.655, source: "speech", kind: "SpeechStarted", payload: .object(["utteranceId": .string("u-0419")])),
         Scripted(time: 11.20, source: "speech", kind: "SpeechFinished", payload: .object(["utteranceId": .string("u-0419")])),

@@ -24,6 +24,7 @@ must keep that safety behavior if rendering or any cloud link is down.
 The body protocol gives walking and other motions an explicit priority. 
 - Everything on the phone that moves the legs goes through `Legs` (`:core`). A driver holds a pose by calling `drive` steadily; nothing below it resends, so a stalled driver trips the Pico's 500 ms timeout. Do not add resend or keep-alive below `Legs`.
 - The Pico serves one client, the phone, on its own Wi-Fi network; Robot Relay reaches it through the phone. Interrupting the Pico over USB (any `mpremote` call) stops the body link until its next reset.
+- A log is a telemetry event whose `kind` starts with `log.`, written through `Telemetry.logger` (rule: `isLog` in `core/.../telemetry/Telemetry.kt`). 
 - Train deployed policies only on observations the mounted Pixel 8 can produce.
 Record sensor axes and units, phone orientation, observation history,
 action-to-servo mapping, body geometry, and control rate with each policy.

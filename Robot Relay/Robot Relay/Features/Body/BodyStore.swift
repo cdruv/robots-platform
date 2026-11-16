@@ -2,7 +2,7 @@ import Foundation
 import Observation
 import os
 
-/// Drives the legs and trims them from the Drive tab.
+/// Drives the legs from Live Robot and trims them from Firmware.
 ///
 /// The Pico lets the legs go limp 500 ms after the last target, so while engaged this store
 /// sends the current targets 50 times a second. That stream is the only thing keeping the
@@ -64,6 +64,11 @@ final class BodyStore {
 
     var pico: PicoBodyState? { link?.pico }
     var canEngage: Bool { pico != nil }
+
+    var canStop: Bool {
+        guard let pico else { return false }
+        return mode != .off || pico.mode == .active
+    }
 
     func start() {
         guard states == nil else { return }

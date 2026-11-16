@@ -8,14 +8,14 @@ final class AppModel {
 
     let connection: ConnectionStore
     let live: LiveRobotStore
-    let telemetry: TelemetryStore
+    let logs: LogStore
     let firmware: FirmwareStore
     let body: BodyStore
 
     init(services: RobotServices) {
         connection = ConnectionStore(service: services.link)
         live = LiveRobotStore(service: services.live)
-        telemetry = TelemetryStore(service: services.telemetry)
+        logs = LogStore(service: services.telemetry)
         firmware = FirmwareStore(service: services.firmware)
         body = BodyStore(service: services.body)
     }
@@ -24,7 +24,7 @@ final class AppModel {
     func start() {
         connection.start()
         live.start()
-        telemetry.start()
+        logs.start()
         firmware.start()
         body.start()
     }

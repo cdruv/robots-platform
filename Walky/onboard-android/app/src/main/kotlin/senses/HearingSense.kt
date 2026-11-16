@@ -228,6 +228,7 @@ class HearingSense(private val context: Context, private val log: Logger) : Sens
 
     private fun postFinal(text: String, confidence: Float?) {
         current.update { it.copy(partial = "", lastFinal = text) }
+        log.info("heard “$text”")
         post?.invoke(HeardUtterance(text, isFinal = true, confidence = confidence))
     }
 

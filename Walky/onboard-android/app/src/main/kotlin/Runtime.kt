@@ -12,7 +12,7 @@ import com.vadymsidorov.walky.core.output.Legs
 import com.vadymsidorov.walky.core.reflex.MotionReflex
 import com.vadymsidorov.walky.core.senses.Sense
 import com.vadymsidorov.walky.core.telemetry.DefaultTelemetry
-import com.vadymsidorov.walky.core.telemetry.RecentEventsSink
+import com.vadymsidorov.walky.core.telemetry.RecentLogsSink
 import com.vadymsidorov.walky.core.telemetry.TcpServerSink
 import com.vadymsidorov.walky.output.ComposeFace
 import com.vadymsidorov.walky.senses.HearingSense
@@ -30,7 +30,7 @@ import kotlinx.serialization.json.put
 /** Owns a foreground session. Construction alone starts no work. */
 class Runtime(context: Context) {
     private val app = context.applicationContext
-    val recentEvents = RecentEventsSink()
+    val recentLogs = RecentLogsSink()
     val face = ComposeFace()
     val inference = Inference()
     val picoWifi = PicoWifi(app) { telemetry.logger("pico-wifi") }
@@ -61,11 +61,9 @@ class Runtime(context: Context) {
         telemetryServer.start()
         relayWifi.start(telemetryServer.status.value.wifiPort)
         telemetry.start()
-        telemetry.emit("runtime", "resume", buildJsonObject {
-            put("inference", inference.backendName)
-            put("reflexes", "imu->face")
-            put("telemetryPort", telemetryServer.status.value.port)
-        })
+        telemetry.logger("runtime").info(
+            "resumed: inference ${inference.backendName}, reflexes imu->face, telemetry port ${telemetryServer.status.value.port}",
+        )
         picoWifi.resume()
         session.body.start()
         session.bodyRelay.start()
@@ -113,7 +111,7 @@ class Runtime(context: Context) {
             onLine = { bodyRelay.onLine(it) },
             wifi = relayWifi,
         )
-        val telemetry = DefaultTelemetry(listOf(LogcatSink(), server, recentEvents), scope)
+        val telemetry = DefaultTelemetry(listOf(LogcatSink(), server, recentLogs), scope)
         val hearing = HearingSense(app, telemetry.logger("hearing"))
         val imu = ImuSense(app, telemetry.logger("imu"))
         val senses: List<Sense> = listOf(hearing, imu)

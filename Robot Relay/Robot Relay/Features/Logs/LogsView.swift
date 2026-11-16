@@ -1,15 +1,15 @@
 import SwiftUI
 
-/// Event stream with an inspector for the selected event.
-struct TelemetryView: View {
+/// Log lines from the phone with an inspector for the selected line.
+struct LogsView: View {
     var body: some View {
         HStack(spacing: 0) {
-            TelemetryStreamView()
+            LogStreamView()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Rectangle()
                 .fill(Nocturne.neutral900)
                 .frame(width: 1)
-            TelemetryInspector()
+            LogInspector()
                 .frame(width: 300)
                 .dimmedBehindPopover()
         }
@@ -35,16 +35,16 @@ struct StreamScrollMetrics: Equatable {
     }
 }
 
-struct TelemetryStreamView: View {
+struct LogStreamView: View {
     @Environment(AppModel.self) private var app
     @State private var metrics = StreamScrollMetrics()
     @State private var isUserScrolling = false
 
     var body: some View {
-        @Bindable var store = app.telemetry
+        @Bindable var store = app.logs
         ScrollViewReader { proxy in
             VStack(spacing: 0) {
-                ViewHeader("Telemetry", compactChip: true) {
+                ViewHeader("Logs", compactChip: true) {
                     NocturneSegmented(
                         selection: $store.filter,
                         options: [(.all, "All"), (.warnPlus, "Warn+"), (.error, "Error")]
@@ -58,7 +58,7 @@ struct TelemetryStreamView: View {
 
                 HStack(spacing: 0) {
                     list(store: store, proxy: proxy)
-                    TelemetryMinimap(events: store.visibleEvents, visibleRange: metrics.visibleRange) { event in
+                    LogMinimap(events: store.visibleEvents, visibleRange: metrics.visibleRange) { event in
                         store.select(event.seq)
                         withAnimation(.easeOut(duration: 0.2)) {
                             proxy.scrollTo(event.seq, anchor: .center)
@@ -94,11 +94,11 @@ struct TelemetryStreamView: View {
         }
     }
 
-    private func list(store: TelemetryStore, proxy: ScrollViewProxy) -> some View {
+    private func list(store: LogStore, proxy: ScrollViewProxy) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
                 ForEach(store.visibleEvents) { event in
-                    TelemetryRow(
+                    LogRow(
                         event: event,
                         time: store.timeLabel(for: event),
                         timeWidth: store.timeMode == .relative ? 64 : 92,
@@ -134,18 +134,18 @@ struct TelemetryStreamView: View {
     }
 
     private func jumpToLive(_ proxy: ScrollViewProxy) {
-        app.telemetry.setFollowLive(true)
+        app.logs.setFollowLive(true)
         scrollToEnd(proxy)
     }
 
     private func scrollToEnd(_ proxy: ScrollViewProxy) {
-        if let last = app.telemetry.visibleEvents.last?.seq {
+        if let last = app.logs.visibleEvents.last?.seq {
             proxy.scrollTo(last, anchor: .bottom)
         }
     }
 }
 
-struct TelemetryRow: View {
+struct LogRow: View {
     let event: TelemetryEvent
     let time: String
     let timeWidth: CGFloat
@@ -180,27 +180,23 @@ struct TelemetryRow: View {
 
     static func barColor(_ level: TelemetryEvent.Level) -> Color {
         switch level {
-        case .debug: Nocturne.accent700
         case .info: Nocturne.neutral800
         case .warn: Nocturne.accent300
         case .error: Nocturne.Log.error
-        case .heard: Nocturne.accent
         }
     }
 
     static func messageColor(_ level: TelemetryEvent.Level) -> Color {
         switch level {
-        case .debug: Nocturne.neutral400
         case .info: Nocturne.Log.output
         case .warn: Nocturne.accent300
         case .error: Nocturne.Log.error
-        case .heard: Nocturne.accent200
         }
     }
 }
 
 /// Right-edge overview: warn/error marks plus a box for the visible window.
-struct TelemetryMinimap: View {
+struct LogMinimap: View {
     let events: [TelemetryEvent]
     let visibleRange: ClosedRange<CGFloat>
     let onSelect: (TelemetryEvent) -> Void
@@ -214,7 +210,7 @@ struct TelemetryMinimap: View {
                     guard level == .warn || level == .error else { continue }
                     let y = size.height * CGFloat(index) / count
                     let mark = CGRect(x: 2, y: y, width: size.width - 4, height: level == .error ? 3 : 2)
-                    context.fill(Path(mark), with: .color(TelemetryRow.barColor(level)))
+                    context.fill(Path(mark), with: .color(LogRow.barColor(level)))
                 }
                 let window = CGRect(
                     x: 0.5,

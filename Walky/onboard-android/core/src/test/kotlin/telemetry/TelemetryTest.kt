@@ -100,6 +100,9 @@ class TelemetryTest {
         val report = sink.events.single { it.kind == "dropped" }
         assertEquals(DefaultTelemetry.SOURCE, report.source)
         assertEquals(JsonPrimitive(15L), (report.payload as JsonObject)["queue"])
+        val log = sink.events.single { it.kind == "log.warn" }
+        assertEquals(DefaultTelemetry.SOURCE, log.source)
+        assertTrue(log.presentation().message, log.presentation().message.contains("15"))
     }
 
     @Test
@@ -129,12 +132,23 @@ class TelemetryTest {
         assertTrue(sink.closed)
     }
 
+    private fun event(seq: Long, kind: String) = TelemetryEvent(seq, 0, 0, "s", kind, JsonPrimitive(seq))
+
     @Test
-    fun recentEventsSinkKeepsNewest() {
-        val sink = RecentEventsSink(capacity = 3)
-        val events = (1L..5L).map { TelemetryEvent(it, 0, 0, "s", "k$it", JsonPrimitive(it)) }
-        sink.write(events.take(2))
-        sink.write(events.drop(2))
-        assertEquals(listOf("k3", "k4", "k5"), sink.events.value.map { it.kind })
+    fun recentLogsSinkKeepsNewestLogsOnly() {
+        val sink = RecentLogsSink(capacity = 3)
+        sink.write((1L..3L).map { event(it, "log.info") })
+        sink.write(listOf(event(4, "Motion"), event(5, "log.warn"), event(6, "HeardUtterance"), event(7, "log.error")))
+        assertEquals(listOf(3L, 5L, 7L), sink.logs.value.map { it.seq })
+    }
+
+    @Test
+    fun recentLogsSinkAcceptsNewLogsAfterClear() {
+        val sink = RecentLogsSink(capacity = 2)
+        sink.write(listOf(event(1, "log.info"), event(2, "log.info")))
+        sink.clear()
+        assertTrue(sink.logs.value.isEmpty())
+        sink.write(listOf(event(3, "log.info")))
+        assertEquals(listOf(3L), sink.logs.value.map { it.seq })
     }
 }

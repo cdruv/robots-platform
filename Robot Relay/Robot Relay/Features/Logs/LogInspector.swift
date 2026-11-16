@@ -1,11 +1,11 @@
 import AppKit
 import SwiftUI
 
-struct TelemetryInspector: View {
+struct LogInspector: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        let store = app.telemetry
+        let store = app.logs
         Group {
             if let event = store.selectedEvent {
                 detail(event, store: store)
@@ -23,7 +23,7 @@ struct TelemetryInspector: View {
         .padding(.vertical, 16)
     }
 
-    private func detail(_ event: TelemetryEvent, store: TelemetryStore) -> some View {
+    private func detail(_ event: TelemetryEvent, store: LogStore) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             Kicker("Event · seq \(event.seq)")
             Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 4) {
@@ -54,10 +54,10 @@ struct TelemetryInspector: View {
                         Text(isCurrent ? "0.00" : "\(Fmt.signed(entry.offset, decimals: 2)) s")
                             .frame(width: 56, alignment: .trailing)
                         Text(entry.event.level.label)
-                            .foregroundStyle(TelemetryRow.messageColor(entry.event.level))
+                            .foregroundStyle(LogRow.messageColor(entry.event.level))
                             .frame(width: 38, alignment: .leading)
                         Text(entry.event.message)
-                            .foregroundStyle(TelemetryRow.messageColor(entry.event.level))
+                            .foregroundStyle(LogRow.messageColor(entry.event.level))
                             .truncationMode(.tail)
                     }
                     .lineLimit(1)

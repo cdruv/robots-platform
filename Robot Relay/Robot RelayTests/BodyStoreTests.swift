@@ -15,8 +15,8 @@ struct BodyStoreTests {
 
     private let start = ContinuousClock.now
 
-    private func connected(trim: [Int] = [0, 0], saved: [Int] = [0, 0], stored: Bool = false) -> BodyLink {
-        let pico = PicoBodyState(board: "e66118604b", mode: .limp, target: [0, 0], pulses: nil,
+    private func connected(mode: PicoBodyState.Mode = .limp, trim: [Int] = [0, 0], saved: [Int] = [0, 0], stored: Bool = false) -> BodyLink {
+        let pico = PicoBodyState(board: "e66118604b", mode: mode, target: [0, 0], pulses: mode == .active ? [1500, 1500] : nil,
                                  trim: trim, saved: saved, stored: stored, error: nil)
         return BodyLink(phase: "connected", pico: pico, rttMs: 12)
     }
@@ -92,6 +92,27 @@ struct BodyStoreTests {
         #expect(store.targets == LegAngles())
         store.setTarget(.right, 15)
         #expect(store.targets == LegAngles(left: 15, right: 15))
+    }
+
+    @Test func stopAvailabilityTracksRelayAndPicoActivity() {
+        let (store, _) = store(nil)
+        #expect(!store.canStop)
+        store.apply(connected())
+        #expect(!store.canStop)
+        for mode in [BodyStore.Mode.drive, .calibrate] {
+            store.engage(mode, at: start)
+            #expect(store.canStop)
+            store.stop()
+            #expect(!store.canStop)
+        }
+        store.apply(connected(mode: .active))
+        #expect(store.canStop)
+        store.stop()
+        #expect(store.canStop)
+        store.apply(connected())
+        #expect(!store.canStop)
+        store.apply(BodyLink(phase: "searching", pico: nil, rttMs: nil))
+        #expect(!store.canStop)
     }
 
     @Test func stopAlwaysSendsLimpAndEndsTheStream() {

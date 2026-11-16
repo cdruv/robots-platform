@@ -3,7 +3,7 @@ import UniformTypeIdentifiers
 import AppKit
 import os
 
-/// Firmware files, power-on mode and the stored leg trim on the left; the commands run on the right.
+/// Firmware files, power-on mode and leg calibration on the left; the commands run on the right.
 struct FirmwareView: View {
     @Environment(AppModel.self) private var app
 
@@ -18,7 +18,7 @@ struct FirmwareView: View {
                     if !state.hasDevice { USBRequiredCard() }
                     FirmwareFilesCard(store: store)
                     PowerOnModeCard(store: store)
-                    LegOffsetsCard(store: store)
+                    LegCalibrationCard(legs: app.body, firmware: store)
                   }
                 }
                 .frame(maxWidth: .infinity)
@@ -230,35 +230,6 @@ struct PowerOnModeCard: View {
         warning.foregroundColor = Nocturne.accent300
         text.append(warning)
         return text
-    }
-}
-
-/// The trim stored on the board, as read over USB. It is changed in the Drive tab.
-struct LegOffsetsCard: View {
-    let store: FirmwareStore
-
-    var body: some View {
-        let snapshot = store.state.calibration
-        Card {
-            CardHeader(
-                title: "Leg calibration", note: "° · ±9",
-                status: !store.hasDevice ? "needs USB" : snapshot?.stored == true ? "calibrated" : "not calibrated"
-            )
-            if let error = snapshot?.error {
-                Text("Stored calibration ignored: " + error).foregroundStyle(Nocturne.Log.error)
-            }
-            if store.hasDevice, let stored = snapshot?.offsets {
-                Text("L \(Fmt.signed(stored.left))° · R \(Fmt.signed(stored.right))°")
-                    .font(.nocturneMono(11.5))
-                    .foregroundStyle(Nocturne.neutral200)
-            } else if store.hasDevice {
-                Text("Upload firmware to read the stored trim.")
-            }
-            Text("Read from the board over USB. Calibrate in the Drive tab, with the robot on battery.")
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .font(.nocturne(11.5))
-        .foregroundStyle(Nocturne.neutral500)
     }
 }
 

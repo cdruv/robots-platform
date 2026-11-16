@@ -17,7 +17,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.Role
-import com.vadymsidorov.walky.core.telemetry.DebugLogFilter
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -62,7 +61,6 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.vadymsidorov.walky.Runtime
 import com.vadymsidorov.walky.core.telemetry.TelemetryEvent
-import com.vadymsidorov.walky.core.telemetry.groupDebugEvents
 import com.vadymsidorov.walky.core.telemetry.presentation
 import com.vadymsidorov.walky.core.telemetry.toJsonLine
 import com.vadymsidorov.walky.senses.HearingState
@@ -107,7 +105,7 @@ fun DebugToggle(active: Boolean, onClick: () -> Unit, modifier: Modifier = Modif
     }
 }
 
-/** Hearing status, the IMU reflex feed, the Pico link, telemetry stream status, and the most recent telemetry events. */
+/** Hearing status, the IMU reflex feed, the Pico link, telemetry stream status, and the most recent logs. */
 @Composable
 fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier) {
     val hearing by runtime.hearing.status.collectAsStateWithLifecycle()
@@ -115,20 +113,10 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
     val server by runtime.telemetryServer.status.collectAsStateWithLifecycle()
     val link by runtime.legs.state.collectAsStateWithLifecycle()
     val picoWifi by runtime.picoWifi.status.collectAsStateWithLifecycle()
-    val events by runtime.recentEvents.events.collectAsStateWithLifecycle()
-    var showPartial by rememberSaveable { mutableStateOf(false) }
-    var showMotion by rememberSaveable { mutableStateOf(true) }
-    var showSpeech by rememberSaveable { mutableStateOf(true) }
-    var showSystem by rememberSaveable { mutableStateOf(true) }
+    val logs by runtime.recentLogs.logs.collectAsStateWithLifecycle()
     var fontSize by rememberSaveable { mutableIntStateOf(13) }
     var settings by rememberSaveable { mutableStateOf(false) }
-    val filter = DebugLogFilter(showPartial, showMotion, showSpeech, showSystem)
-    var groupedKinds by rememberSaveable { mutableStateOf(arrayListOf("Motion")) }
-    var windowSeconds by rememberSaveable { mutableIntStateOf(15) }
-    val visibleEvents = remember(events, filter) { events.filter(filter::includes) }
-    val rows = remember(visibleEvents, groupedKinds, windowSeconds) {
-        groupDebugEvents(visibleEvents, groupedKinds.toSet(), windowSeconds)
-    }
+    val rows = remember(logs) { logs.asReversed() }
     val listState = rememberLazyListState()
     var following by remember { mutableStateOf(true) }
     var userScrolling by remember { mutableStateOf(false) }
@@ -152,7 +140,7 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
         }
     }
     // Key on sequence, not count: the ring buffer stays at 300 entries when full.
-    LaunchedEffect(visibleEvents.lastOrNull()?.seq, following, settings, listState.isScrollInProgress) {
+    LaunchedEffect(logs.lastOrNull()?.seq, following, settings, listState.isScrollInProgress) {
         if (following && !settings && !listState.isScrollInProgress) listState.scrollToItem(0)
     }
     val time = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
@@ -244,31 +232,12 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
         Spacer(Modifier.height(8.dp))
         Box(Modifier.fillMaxWidth().height(1.dp).background(Dim.copy(alpha = 0.45f)))
         BasicText(
-            if (settings) "DEBUG SETTINGS" else "LOGS · ${visibleEvents.size} · ${if (following) "live" else "paused"} · tap for details",
+            if (settings) "DEBUG SETTINGS" else "LOGS · ${logs.size} · ${if (following) "live" else "paused"} · tap for details",
             style = Mono.copy(color = Dim), modifier = Modifier.padding(vertical = 8.dp),
         )
         Box(Modifier.weight(1f)) {
             if (settings) {
                 Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterButton("Partials", showPartial) { showPartial = !showPartial }
-                    FilterButton("Motion", showMotion) { showMotion = !showMotion }
-                    FilterButton("Speech", showSpeech) { showSpeech = !showSpeech }
-                    FilterButton("System / other", showSystem) { showSystem = !showSystem }
-                    BasicText("Warnings and errors always visible", style = Mono.copy(color = Dim))
-                    Spacer(Modifier.height(8.dp))
-                    BasicText("Group events within", style = Mono.copy(color = Bright))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(5, 15, 30, 60).forEach { seconds ->
-                            DebugButton("${seconds}s", windowSeconds == seconds) { windowSeconds = seconds }
-                        }
-                    }
-                    BasicText("Group by event kind", style = Mono.copy(color = Bright))
-                    val availableKinds = (events.map { it.kind } + groupedKinds + "Motion").toSortedSet()
-                    availableKinds.forEach { kind ->
-                        FilterButton(kind, kind in groupedKinds) {
-                            groupedKinds = ArrayList(if (kind in groupedKinds) groupedKinds - kind else groupedKinds + kind)
-                        }
-                    }
                     BasicText("Log font size", style = Mono.copy(color = Bright))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(11, 13, 16, 19).forEach { size ->
@@ -279,12 +248,9 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
                 }
             } else {
                 LazyColumn(Modifier.fillMaxSize().nestedScroll(scrollConnection), state = listState, reverseLayout = true) {
-                    items(rows, key = { it.first().seq }) { group ->
-                        if (group.size == 1) EventRow(group.first(), time, fontSize)
-                        else GroupRow(group, time, fontSize)
-                    }
+                    items(rows, key = { it.seq }) { LogRow(it, time, fontSize) }
                 }
-                if (visibleEvents.isEmpty()) BasicText("No logs to show", style = Mono.copy(color = Dim))
+                if (logs.isEmpty()) BasicText("No logs to show", style = Mono.copy(color = Dim))
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Dim.copy(alpha = 0.45f)))
@@ -296,7 +262,7 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
             horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
             FooterButton("Clear logs", FooterIcon.Clear) {
-                runtime.recentEvents.clear()
+                runtime.recentLogs.clear()
                 following = true
             }
             FooterButton(
@@ -311,43 +277,13 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
 }
 
 @Composable
-private fun GroupRow(events: List<TelemetryEvent>, time: SimpleDateFormat, fontSize: Int) {
-    var expanded by rememberSaveable { mutableStateOf(false) }
-    val latest = events.last()
-    val unit = if (latest.kind == "Motion") "actions" else "events"
-    val style = Mono.copy(fontSize = fontSize.sp, lineHeight = (fontSize + 4).sp)
-    Column(Modifier.fillMaxWidth()) {
-        BasicText(
-            buildAnnotatedString {
-                append(if (expanded) "▾ " else "▸ ")
-                withStyle(SpanStyle(color = Timestamp)) { append(time.format(Date(latest.tsWallMs))) }
-                append("  ${latest.kind}  ${events.size} $unit")
-            },
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 5.5.dp),
-            style = style.copy(color = Bright),
-        )
-        if (expanded) {
-            Column(Modifier.padding(start = 14.dp)) {
-                events.forEach { event ->
-                    SelectionContainer {
-                        BasicText(event.toJsonLine(), modifier = Modifier.padding(vertical = 4.dp), style = style.copy(color = Bright))
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun EventRow(event: TelemetryEvent, time: SimpleDateFormat, fontSize: Int) {
+private fun LogRow(event: TelemetryEvent, time: SimpleDateFormat, fontSize: Int) {
     val logStyle = Mono.copy(fontSize = fontSize.sp, lineHeight = (fontSize + 4).sp)
     var expanded by remember(event.seq) { mutableStateOf(false) }
     val summary = remember(event) { event.presentation() }
     val color = when (summary.label) {
         "ERROR" -> Red
         "WARN" -> Amber
-        "HEARD" -> Cyan
-        "PARTIAL" -> Dim
         else -> Bright
     }
     Column(Modifier.fillMaxWidth().clickable { expanded = !expanded }.padding(vertical = 5.5.dp)) {
@@ -378,11 +314,6 @@ private fun DebugButton(label: String, selected: Boolean = false, onClick: () ->
     BasicText(label, style = Mono.copy(color = if (selected) Cyan else Bright),
         modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(Dim.copy(alpha = 0.15f))
             .clickable(role = Role.Button, onClick = onClick).padding(horizontal = 10.dp, vertical = 14.dp))
-}
-
-@Composable
-private fun FilterButton(label: String, enabled: Boolean, onClick: () -> Unit) {
-    DebugButton("${if (enabled) "✓" else "–"} $label", enabled, onClick)
 }
 
 private enum class FooterIcon { Clear, Settings, Back, Latest }
