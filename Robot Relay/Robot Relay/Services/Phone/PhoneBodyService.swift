@@ -1,6 +1,6 @@
 import Foundation
 
-/// The body link through the shared `PhoneConnection`: Mac → adb forward → phone → Pico.
+/// The body link through the shared `PhoneConnection`: Mac → adb forward or Wi‑Fi (TLS) → phone → Pico.
 final class PhoneBodyService: BodyService {
     private let connection: PhoneConnection
     private let stream = AsyncStream.makeStream(of: BodyLink?.self, bufferingPolicy: .bufferingNewest(1))

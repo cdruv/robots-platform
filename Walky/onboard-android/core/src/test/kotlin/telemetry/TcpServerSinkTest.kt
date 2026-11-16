@@ -14,8 +14,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.BufferedReader
 import java.io.InputStreamReader
+import java.net.InetAddress
+import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.util.Base64
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 class TcpServerSinkTest {
     private fun event(seq: Long) = TelemetryEvent(seq, 1_000 + seq, seq, "test", "k$seq", JsonPrimitive(seq))
@@ -229,6 +234,132 @@ class TcpServerSinkTest {
             second.close()
         } finally {
             first.close()
+        }
+    }
+
+    // Wi-Fi listener: a plain loopback socket stands in for the app's TLS one.
+
+    private class FakeWifi(var stored: ByteArray? = null) : WifiAccess {
+        override fun listen() = ServerSocket(0, 0, InetAddress.getByName("127.0.0.1"))
+        override val fingerprint = "ab12"
+        override fun key() = stored
+        override fun storeKey(key: ByteArray) {
+            stored = key
+        }
+    }
+
+    private val relayKey = ByteArray(TcpServerSink.KEY_BYTES) { it.toByte() }
+    private fun auth(key: ByteArray) = """{"link":"auth","key":"${Base64.getEncoder().encodeToString(key)}"}"""
+
+    private fun Socket.assertSilent() {
+        soTimeout = 300
+        assertTrue(runCatching { getInputStream().read() }.exceptionOrNull() is SocketTimeoutException)
+        soTimeout = 5_000
+    }
+
+    @Test
+    fun wifiClientGetsNothingUntilItPresentsTheKeyThenTheFullStream() {
+        val received = LinkedBlockingQueue<JsonObject>()
+        val sink = TcpServerSink(port = 0, replayEvents = 1, onLine = { received += it }, wifi = FakeWifi(relayKey))
+        try {
+            sink.write(listOf(event(1)))
+            val wifiPort = sink.status.value.wifiPort!!
+            val (early, earlyReader) = connect(wifiPort)
+            early.use {
+                early.assertSilent()
+                // A leg command in place of the key is refused, not acted on.
+                early.send("""{"link":"body","legs":[10,20]}""")
+                assertEquals("denied", json(earlyReader.readLine())["reason"]?.jsonPrimitive?.content)
+                assertEquals(null, earlyReader.readLine())
+            }
+            assertEquals(0, sink.status.value.clients)
+
+            val (socket, reader) = connect(wifiPort)
+            socket.use {
+                socket.send(auth(relayKey))
+                val hello = json(reader.readLine())
+                assertEquals("hello", hello["link"]?.jsonPrimitive?.content)
+                assertEquals(wifiPort.toString(), hello["port"]?.jsonPrimitive?.content)
+                assertFalse(hello.containsKey("cert"))
+                assertEquals(event(1), WalkyJson.decodeFromString(TelemetryEvent.serializer(), reader.readLine()))
+                awaitClients(sink, 1)
+                sink.write(listOf(event(2)))
+                assertEquals(event(2), WalkyJson.decodeFromString(TelemetryEvent.serializer(), reader.readLine()))
+
+                socket.send("""{"link":"body","limp":true}""")
+                assertEquals(json("""{"link":"body","limp":true}"""), received.poll(5, TimeUnit.SECONDS))
+            }
+            // The leg command sent before admission never arrived.
+            assertEquals(null, received.poll())
+        } finally {
+            sink.close()
+        }
+    }
+
+    @Test
+    fun wifiClientWithAWrongKeyOrNoStoredKeyIsRefusedAndClosed() {
+        for ((stored, reason) in listOf(relayKey to "denied", null to "unpaired")) {
+            val sink = TcpServerSink(port = 0, wifi = FakeWifi(stored))
+            try {
+                sink.start()
+                val (socket, reader) = connect(sink.status.value.wifiPort!!)
+                socket.use {
+                    socket.send(auth(ByteArray(TcpServerSink.KEY_BYTES) { 7 }))
+                    assertEquals(json("""{"link":"auth","ok":false,"reason":"$reason"}"""), json(reader.readLine()))
+                    assertEquals(null, reader.readLine())
+                }
+                assertEquals(0, sink.status.value.clients)
+            } finally {
+                sink.close()
+            }
+        }
+    }
+
+    @Test
+    fun keyIsStoredFromLoopbackOnlyAndOnlyTheLoopbackHelloCarriesTheCertificate() {
+        val wifi = FakeWifi()
+        val received = LinkedBlockingQueue<JsonObject>()
+        val sink = TcpServerSink(port = 0, onLine = { received += it }, wifi = wifi)
+        try {
+            sink.start()
+            val (usb, usbReader) = connect(sink.status.value.port!!)
+            usb.use {
+                assertEquals("ab12", json(usbReader.readLine())["cert"]?.jsonPrimitive?.content)
+                usb.send("""{"link":"key","key":"${Base64.getEncoder().encodeToString(relayKey)}"}""")
+                usb.send("""{"ping":1}""")
+                assertEquals("pong", json(usbReader.readLine())["link"]?.jsonPrimitive?.content)
+                assertTrue(relayKey.contentEquals(wifi.stored))
+            }
+
+            val (remote, remoteReader) = connect(sink.status.value.wifiPort!!)
+            remote.use {
+                remote.send(auth(relayKey))
+                assertEquals("hello", json(remoteReader.readLine())["link"]?.jsonPrimitive?.content)
+                val other = ByteArray(TcpServerSink.KEY_BYTES) { 9 }
+                remote.send("""{"link":"key","key":"${Base64.getEncoder().encodeToString(other)}"}""")
+                remote.send("""{"ping":2}""")
+                assertEquals("pong", json(remoteReader.readLine())["link"]?.jsonPrimitive?.content)
+                assertTrue(relayKey.contentEquals(wifi.stored))
+            }
+            // Neither key line is a body command.
+            assertEquals(null, received.poll())
+        } finally {
+            sink.close()
+        }
+    }
+
+    @Test
+    fun wifiClientThatNeverAuthenticatesIsClosed() {
+        val sink = TcpServerSink(port = 0, wifi = FakeWifi(relayKey))
+        try {
+            sink.start()
+            val (socket, reader) = connect(sink.status.value.wifiPort!!)
+            socket.use {
+                socket.soTimeout = TcpServerSink.AUTH_TIMEOUT_MS + 2_000
+                assertEquals(null, reader.readLine())
+            }
+        } finally {
+            sink.close()
         }
     }
 }

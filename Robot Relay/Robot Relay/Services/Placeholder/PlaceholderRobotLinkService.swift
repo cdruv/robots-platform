@@ -23,6 +23,7 @@ final class PlaceholderRobotLinkService: RobotLinkService {
 
     func disconnectPhone() async {
         current.phone.state = .disconnected
+        current.phone.route = nil
         current.phone.rttMs = nil
         current.phone.eventsPerSecond = 0
         current.pico = PicoLink(route: .usb, arm: .idle, modes: Self.modes)
@@ -49,7 +50,7 @@ final class PlaceholderRobotLinkService: RobotLinkService {
 
     private static func connected() -> RobotLinks {
         RobotLinks(
-            phone: PhoneLink(state: .connected, deviceName: "Pixel 8", rttMs: 38, eventsPerSecond: 18, dropped: 0),
+            phone: PhoneLink(state: .connected, route: .usb, isPairedForWifi: true, deviceName: "Pixel 8", rttMs: 38, eventsPerSecond: 18, dropped: 0),
             pico: PicoLink(
                 route: .viaPhone,
                 bodyMode: .limp,

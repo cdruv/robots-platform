@@ -12,15 +12,26 @@ nonisolated struct RobotLinks: Equatable, Sendable {
     var linkCount: Int { 3 }
 }
 
-/// The onboard Android app (the robot's brain), reached over TCP.
+/// The onboard Android app (the robot's brain), reached over USB or Wi-Fi.
 nonisolated struct PhoneLink: Equatable, Sendable {
     enum State: Equatable, Sendable {
         case disconnected, connecting, connected
         /// Waiting to reconnect at the given time.
         case retrying(Date)
+        /// Nothing to dial: no phone on USB and none found on Wi-Fi. Resumes when the phone
+        /// appears on Wi-Fi, or on Retry.
+        case waiting
+    }
+
+    enum Route: Equatable, Sendable {
+        case usb, wifi
     }
 
     var state: State = .disconnected
+    /// The route of the current attempt or connection.
+    var route: Route?
+    /// Relay has the phone's certificate from a USB hello, so it can connect over Wi-Fi.
+    var isPairedForWifi = false
     /// From the phone's hello line.
     var deviceName = "—"
     var rttMs: Int?

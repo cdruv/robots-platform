@@ -255,7 +255,7 @@ struct PhoneBodyStatusTests {
         var reports: [BodyLink?] = []
         var hellos = 0
         connection.onBody = { reports.append($0) }
-        connection.onHello = { hellos += 1 }
+        connection.onHello = { _ in hellos += 1 }
         connection.handle(line: Data(#"{"link":"hello","device":"Pixel","session":"s"}"#.utf8))
         connection.handle(line: Data(#"{"link":"hello","device":"Pixel","session":"s"}"#.utf8))
         #expect(hellos == 2, "the pairing is re-sent after a reconnect in the same session")

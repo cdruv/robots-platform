@@ -18,6 +18,7 @@ import com.vadymsidorov.walky.output.ComposeFace
 import com.vadymsidorov.walky.senses.HearingSense
 import com.vadymsidorov.walky.senses.ImuSense
 import com.vadymsidorov.walky.telemetry.LogcatSink
+import com.vadymsidorov.walky.telemetry.RelayWifi
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +34,7 @@ class Runtime(context: Context) {
     val face = ComposeFace()
     val inference = Inference()
     val picoWifi = PicoWifi(app) { telemetry.logger("pico-wifi") }
+    private val relayWifi = RelayWifi(app) { telemetry.logger("relay-wifi") }
     private var session = Session()
     private var running = false
     private var used = false
@@ -57,6 +59,7 @@ class Runtime(context: Context) {
         used = true
         running = true
         telemetryServer.start()
+        relayWifi.start(telemetryServer.status.value.wifiPort)
         telemetry.start()
         telemetry.emit("runtime", "resume", buildJsonObject {
             put("inference", inference.backendName)
@@ -82,6 +85,7 @@ class Runtime(context: Context) {
         // Close sockets immediately and cancel all workers/timers, without draining old work.
         session.body.close()
         picoWifi.pause()
+        relayWifi.stop()
         telemetryServer.close()
         session.scope.cancel()
     }
@@ -107,6 +111,7 @@ class Runtime(context: Context) {
                 }
             },
             onLine = { bodyRelay.onLine(it) },
+            wifi = relayWifi,
         )
         val telemetry = DefaultTelemetry(listOf(LogcatSink(), server, recentEvents), scope)
         val hearing = HearingSense(app, telemetry.logger("hearing"))

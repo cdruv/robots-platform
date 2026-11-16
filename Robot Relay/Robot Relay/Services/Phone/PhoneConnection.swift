@@ -1,18 +1,38 @@
+import CryptoKit
 import Foundation
 import Network
 import os
 
-/// The TCP link to onboard-android's telemetry server (`TcpServerSink`, NDJSON on :7777).
+/// The link to onboard-android's telemetry server (`TcpServerSink`, NDJSON): over USB through
+/// `adb forward` to its loopback listener, or over Wi-Fi to its TLS listener.
 ///
-/// Reconnects every 3 s while the user wants to be connected. It gives up only after
-/// `maxUSBAttempts` USB setups in a row fail (no phone on USB). Once the tunnel opens it keeps
-/// retrying: the phone is attached, and its app may stay paused for a while, for example
-/// behind Android's Wi-Fi approval dialog that the pairing sent on hello brings up. Each
-/// connection starts with a hello line and a replay of recent events; replayed events already
-/// seen in the same session are skipped, so the event stream has no duplicates.
+/// Each attempt asks `route` where to dial. Once a connection opens (the USB tunnel, or TLS
+/// on Wi-Fi) failures don't count: the phone is there, and its app may stay paused for a
+/// while, for example behind Android's Wi-Fi approval dialog that the pairing sent on hello
+/// brings up, so Relay retries every 3 s. After `maxAttempts` attempts in a row that open
+/// nothing, or when the phone refuses Relay's key or shows another certificate, it stops and
+/// waits for `routeAppeared()` or another `connect`. Each connection starts with a hello line
+/// and a replay of recent events; replayed events already seen in the same session are
+/// skipped, so the event stream has no duplicates.
 final class PhoneConnection {
+    /// Where one attempt dials.
+    enum Target {
+        case usb
+        /// The phone's Bonjour endpoint, with what Relay and the phone exchanged over USB.
+        case wifi(NWEndpoint, key: Data, fingerprint: String)
+
+        var route: PhoneLink.Route {
+            switch self {
+            case .usb: .usb
+            case .wifi: .wifi
+            }
+        }
+    }
+
     struct Status: Equatable {
         var state: PhoneLink.State = .disconnected
+        /// The route of the current attempt or connection.
+        var route: PhoneLink.Route?
         var hello: PhoneHello?
         var rttMs: Int?
         var eventsPerSecond = 0
@@ -27,15 +47,17 @@ final class PhoneConnection {
         var mode: PicoBodyState.Mode?
     }
 
-    static let port: UInt16 = 7777
+    static let usbPort: UInt16 = 7777
     static let pingInterval: Duration = .seconds(2)
-    static let retryInterval: Duration = .seconds(3)
-    static let maxUSBAttempts = 4
+    static let maxAttempts = 4
+    /// The phone sends a body report at least every second; this long without a byte, the link is gone.
+    static let silenceLimit: Duration = .seconds(6)
+    static let pairHint = "Connect the phone over USB once to pair"
 
     var onStatus: ((Status) -> Void)?
     var onActivity: ((LinkActivity) -> Void)?
     /// Called for every hello, including the one after a reconnect in the same session.
-    var onHello: (() -> Void)?
+    var onHello: ((PhoneHello) -> Void)?
     /// Every body report from the phone, and nil when the connection to the phone ends.
     var onBody: ((BodyLink?) -> Void)?
 
@@ -45,15 +67,24 @@ final class PhoneConnection {
 
     private let events: AsyncStream<TelemetryEvent>
     private let eventSink: AsyncStream<TelemetryEvent>.Continuation
+    private let retryInterval: Duration
 
     private var connection: NWConnection?
     /// Bumped for every new `NWConnection`, so late callbacks from an old one are ignored.
     private var generation = 0
     private var wantsConnection = false
-    private var usbFailures = 0
+    /// Attempts in a row that opened nothing.
+    private var failures = 0
     private var retryTask: Task<Void, Never>?
     private var tickTask: Task<Void, Never>?
+    private var route: (() async -> Target?)?
+    private var setupTask: Task<Void, Never>?
 
+    private var target: Target?
+    /// The current attempt reached `.ready`: the USB tunnel or the TLS session is up.
+    private var opened = false
+    private var certificateRejected = false
+    private var lastReceived = ContinuousClock.now
     private var framer = LineFramer()
     private var dedupe = SeqDedupe()
     private var sawHello = false
@@ -62,38 +93,59 @@ final class PhoneConnection {
     private var pingsInFlight: [Int64: ContinuousClock.Instant] = [:]
     private var eventsThisSecond = 0
 
-    /// The footer's text for the current connection, as `nc` would be typed.
-    private let connectText = "nc 127.0.0.1 \(PhoneConnection.port)"
-    private var prepareUSB: (() async -> Bool)?
-    private var setupTask: Task<Void, Never>?
+    /// The footer's text for the current attempt, as it would be typed in a terminal.
+    private var connectText = "Looking for Walky"
 
-    init() {
+    init(retryInterval: Duration = .seconds(3)) {
+        self.retryInterval = retryInterval
         (events, eventSink) = AsyncStream.makeStream(of: TelemetryEvent.self, bufferingPolicy: .bufferingNewest(5000))
     }
 
     /// Every event received, without duplicates. Single consumer.
     func telemetry() -> AsyncStream<TelemetryEvent> { events }
 
-    func connect(prepareUSB: @escaping () async -> Bool) {
-        guard !wantsConnection else { return }
-        self.prepareUSB = prepareUSB
+    /// Starts connecting, or tries again at once when waiting. `route` returns nil when there
+    /// is nowhere to dial.
+    func connect(route: @escaping () async -> Target?) {
+        self.route = route
+        if wantsConnection {
+            if status.state == .waiting { restart() }
+            return
+        }
         wantsConnection = true
-        usbFailures = 0
+        restart()
+    }
+
+    /// The phone appeared on Wi-Fi: try at once if waiting.
+    func routeAppeared() {
+        guard wantsConnection, status.state == .waiting else { return }
+        Logger.phone.notice("phone: appeared on Wi-Fi, connecting")
+        restart()
+    }
+
+    private func restart() {
+        failures = 0
         startAttempt()
     }
 
     private func startAttempt() {
+        retryTask?.cancel()
+        retryTask = nil
         status.state = .connecting
+        status.route = nil
         status.hello = nil
-        report("Connecting to Walky over USB", .running)
+        connectText = "Looking for Walky"
+        report(connectText, .running)
+        setupTask?.cancel()
         setupTask = Task {
-            guard !Task.isCancelled, let prepareUSB else { return }
-            let ready = await prepareUSB()
-            guard !Task.isCancelled else { return }
-            if ready {
-                open()
+            guard !Task.isCancelled, let route else { return }
+            let target = await route()
+            guard !Task.isCancelled, wantsConnection else { return }
+            if let target {
+                open(target)
             } else {
-                lost("USB setup failed", stage: "USB connection")
+                opened = false
+                lost("No phone on USB or Wi‑Fi")
             }
         }
     }
@@ -103,32 +155,47 @@ final class PhoneConnection {
         wantsConnection = false
         setupTask?.cancel()
         setupTask = nil
-        prepareUSB = nil
+        route = nil
         retryTask?.cancel()
         retryTask = nil
-        tickTask?.cancel()
-        tickTask = nil
-        closeConnection()
+        endAttempt()
         status.state = .disconnected
-        status.rttMs = nil
-        status.eventsPerSecond = 0
-        endBody()
+        status.route = nil
         if wasActive {
             Logger.phone.notice("phone: disconnected by user")
-            report("USB connection", .ok("disconnected by user"))
+            report("Phone connection", .ok("disconnected by user"))
         }
     }
 
-    private func open() {
+    private func open(_ target: Target) {
         precondition(!RobotServices.isTestHost, "unit tests must not open a phone connection")
-        let port = NWEndpoint.Port(rawValue: Self.port)!
-        generation += 1
+        closeConnection()
         let current = generation
         let tcp = NWProtocolTCP.Options()
         // Leg targets are small lines that must not wait for earlier ones to be acknowledged.
         tcp.noDelay = true
-        let connection = NWConnection(host: "127.0.0.1", port: port, using: NWParameters(tls: nil, tcp: tcp))
+        tcp.connectionTimeout = 5
+        let connection: NWConnection
+        switch target {
+        case .usb:
+            connectText = "nc 127.0.0.1 \(Self.usbPort)"
+            connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: Self.usbPort)!,
+                                      using: NWParameters(tls: nil, tcp: tcp))
+        case .wifi(let endpoint, _, let fingerprint):
+            connectText = Self.lookupCommand(endpoint)
+            let tls = Self.tlsOptions(pinning: fingerprint) { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self, self.generation == current else { return }
+                    self.certificateRejected = true
+                }
+            }
+            connection = NWConnection(to: endpoint, using: NWParameters(tls: tls, tcp: tcp))
+        }
         self.connection = connection
+        self.target = target
+        status.route = target.route
+        opened = false
+        certificateRejected = false
         framer = LineFramer()
         sawHello = false
         sawEvent = false
@@ -148,13 +215,30 @@ final class PhoneConnection {
     private func handle(_ state: NWConnection.State) {
         switch state {
         case .ready:
-            Logger.phone.notice("phone: USB tunnel open (adb forward tcp:\(Self.port, privacy: .public)), waiting for hello")
-            report(connectText, .ok("USB tunnel open · waiting for Walky"))
+            opened = true
+            lastReceived = .now
+            if case .wifi(_, let key, _) = target {
+                if let remote = connection?.currentPath?.remoteEndpoint {
+                    connectText = "openssl s_client -connect \(Self.address(remote))"
+                }
+                Logger.phone.notice("phone: TLS open to \(self.connectText, privacy: .public), certificate pinned, sending key")
+                report(connectText, .ok("TLS open, certificate pinned · waiting for Walky"))
+                connection?.send(content: Self.keyLine("auth", key) + Data([0x0A]), completion: .contentProcessed { error in
+                    if let error { Logger.phone.error("phone: auth send failed: \(error.localizedDescription, privacy: .public)") }
+                })
+            } else {
+                Logger.phone.notice("phone: USB tunnel open (adb forward tcp:\(Self.usbPort, privacy: .public)), waiting for hello")
+                report(connectText, .ok("USB tunnel open · waiting for Walky"))
+            }
             receive()
             startTicking()
         case .waiting(let error), .failed(let error):
-            // `.waiting` is how a refused connection shows up; retry on our own schedule.
-            lost(Self.describe(error))
+            if certificateRejected {
+                refused("Walky’s certificate is not the one paired over USB")
+            } else {
+                // `.waiting` is how a refused connection shows up; retry on our own schedule.
+                lost(Self.describe(error))
+            }
         default:
             break
         }
@@ -166,12 +250,16 @@ final class PhoneConnection {
             MainActor.assumeIsolated {
                 guard let self, self.generation == current else { return }
                 if let data, !data.isEmpty {
-                    for line in self.framer.append(data) { self.handle(line: line) }
+                    self.lastReceived = .now
+                    for line in self.framer.append(data) {
+                        self.handle(line: line)
+                        guard self.generation == current else { return }
+                    }
                 }
                 if let error {
                     self.lost(Self.describe(error))
                 } else if isComplete {
-                    self.lost(self.sawHello || self.sawEvent ? "USB telemetry closed" : "No telemetry received. Open Walky on the unlocked phone.")
+                    self.lost(self.sawHello || self.sawEvent ? "Telemetry closed" : "No telemetry received. Open Walky on the unlocked phone.")
                 } else {
                     self.receive()
                 }
@@ -179,34 +267,57 @@ final class PhoneConnection {
         }
     }
 
-    /// The connection ended without the user asking: schedule a reconnect, or give up.
-    private func lost(_ reason: String, stage: String? = nil) {
+    /// Closes the connection and what depends on it; the state is the caller's to set.
+    private func endAttempt() {
         closeConnection()
         tickTask?.cancel()
         tickTask = nil
         status.rttMs = nil
         status.eventsPerSecond = 0
         endBody()
+    }
+
+    /// The connection ended without the user asking: schedule a reconnect, or wait.
+    private func lost(_ reason: String) {
+        endAttempt()
         guard wantsConnection else { return }
-        // `stage` is set only when USB setup failed; any other failure had the tunnel open.
-        usbFailures = stage == nil ? 0 : usbFailures + 1
-        guard usbFailures < Self.maxUSBAttempts else {
-            Logger.phone.error("phone: USB setup failed \(self.usbFailures, privacy: .public) times in a row: \(reason, privacy: .public), giving up")
-            wantsConnection = false
-            status.state = .disconnected
-            report(stage ?? connectText, .failed("\(reason) · gave up after \(Self.maxUSBAttempts) attempts"))
+        failures = opened ? 0 : failures + 1
+        guard failures < Self.maxAttempts else {
+            Logger.phone.error("phone: \(self.failures, privacy: .public) attempts in a row opened nothing: \(reason, privacy: .public), waiting")
+            wait(report: "\(reason) · waiting for Walky on Wi‑Fi")
             return
         }
-        let delay = Self.retryInterval
-        Logger.phone.notice("phone: connection failed: \(reason, privacy: .public), retrying in \(delay.components.seconds, privacy: .public) s")
-        status.state = .retrying(Date.now.addingTimeInterval(Double(delay.components.seconds)))
-        report(stage ?? connectText, .failed("\(reason) · retry in \(delay.components.seconds) s"))
+        let delay = retryInterval
+        let seconds = Double(delay.components.seconds) + Double(delay.components.attoseconds) / 1e18
+        Logger.phone.notice("phone: connection failed: \(reason, privacy: .public), retrying in \(seconds, privacy: .public) s")
+        status.state = .retrying(Date.now.addingTimeInterval(seconds))
+        report(connectText, .failed("\(reason) · retry in \(Int(seconds.rounded(.up))) s"))
         retryTask?.cancel()
         retryTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self, self.wantsConnection else { return }
             self.startAttempt()
         }
+    }
+
+    /// The phone does not trust Relay or Relay does not trust the phone: retrying cannot help.
+    private func refused(_ reason: String) {
+        endAttempt()
+        Logger.phone.error("phone: \(reason, privacy: .public)")
+        guard wantsConnection else {
+            report(connectText, .failed("\(reason) · \(Self.pairHint)"))
+            return
+        }
+        wait(report: "\(reason) · \(Self.pairHint)")
+    }
+
+    private func wait(report detail: String) {
+        retryTask?.cancel()
+        retryTask = nil
+        status.state = .waiting
+        status.route = nil
+        status.hello = nil
+        report(connectText, .failed(detail))
     }
 
     private func endBody() {
@@ -246,7 +357,7 @@ final class PhoneConnection {
             }
             status.hello = hello
             report("Walky connected · hello \(hello.summary)", .ok(nil))
-            onHello?()
+            onHello?(hello)
         case .pong(let ping):
             guard let sent = pingsInFlight.removeValue(forKey: ping) else { return }
             let elapsed = ContinuousClock.now - sent
@@ -265,6 +376,9 @@ final class PhoneConnection {
         case .body(let link):
             status.body = Body(phase: link.phase, mode: link.pico?.mode)
             onBody?(link)
+        case .auth(let ok, let reason):
+            guard !ok else { return }
+            refused(reason == "unpaired" ? "Walky has no key from Relay" : "Walky refused Relay’s key")
         case .otherLink:
             break
         case nil:
@@ -272,7 +386,7 @@ final class PhoneConnection {
         }
     }
 
-    /// Pings every 2 s and samples ev/s every second while connected.
+    /// Pings every 2 s and samples ev/s every second while open; ends a link gone silent.
     private func startTicking() {
         tickTask?.cancel()
         eventsThisSecond = 0
@@ -282,6 +396,10 @@ final class PhoneConnection {
                 if second % Int(Self.pingInterval.components.seconds) == 0 { self?.sendPing() }
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled, let self else { return }
+                if ContinuousClock.now - self.lastReceived > Self.silenceLimit {
+                    self.lost("No data from Walky for \(Self.silenceLimit.components.seconds) s")
+                    return
+                }
                 self.status.eventsPerSecond = self.eventsThisSecond
                 self.eventsThisSecond = 0
                 second += 1
@@ -305,6 +423,42 @@ final class PhoneConnection {
         onActivity?(LinkActivity(text: text, state: state))
     }
 
+    /// `{"link":"auth","key":"<base64>"}` on Wi-Fi, `{"link":"key",…}` to hand the key over USB.
+    nonisolated static func keyLine(_ link: String, _ key: Data) -> Data {
+        Data(#"{"link":"\#(link)","key":"\#(key.base64EncodedString())"}"#.utf8)
+    }
+
+    /// TLS that accepts only the certificate whose SHA-256 is `fingerprint`; the phone's is
+    /// self-signed, so pinning is the whole check. `rejected` runs on the main queue.
+    nonisolated private static func tlsOptions(pinning fingerprint: String, rejected: @escaping @Sendable () -> Void) -> NWProtocolTLS.Options {
+        let options = NWProtocolTLS.Options()
+        let security = options.securityProtocolOptions
+        sec_protocol_options_set_min_tls_protocol_version(security, .TLSv12)
+        sec_protocol_options_set_verify_block(security, { _, trust, complete in
+            let matches = certificateFingerprint(sec_trust_copy_ref(trust).takeRetainedValue()) == fingerprint
+            if !matches { rejected() }
+            complete(matches)
+        }, .main)
+        return options
+    }
+
+    nonisolated private static func certificateFingerprint(_ trust: SecTrust) -> String? {
+        guard let leaf = (SecTrustCopyCertificateChain(trust) as? [SecCertificate])?.first else { return nil }
+        return SHA256.hash(data: SecCertificateCopyData(leaf) as Data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// `dns-sd -L Walky _walky._tcp` until the connection has resolved an address.
+    nonisolated private static func lookupCommand(_ endpoint: NWEndpoint) -> String {
+        if case .service(let name, let type, _, _) = endpoint { return "dns-sd -L \(name) \(type)" }
+        return "openssl s_client -connect \(address(endpoint))"
+    }
+
+    nonisolated private static func address(_ endpoint: NWEndpoint) -> String {
+        guard case .hostPort(let host, let port) = endpoint else { return "\(endpoint)" }
+        if case .ipv6 = host { return "[\(host)]:\(port)" }
+        return "\(host):\(port)"
+    }
+
     private static func describe(_ error: NWError) -> String {
         switch error {
         case .posix(.ECONNREFUSED): "refused"
@@ -312,6 +466,7 @@ final class PhoneConnection {
         case .posix(.EHOSTUNREACH), .posix(.ENETUNREACH): "unreachable"
         case .posix(.ECONNRESET): "reset"
         case .dns: "unknown host"
+        case .tls: "TLS failed"
         default: error.localizedDescription
         }
     }
@@ -324,6 +479,8 @@ nonisolated struct PhoneHello: Decodable, Equatable, Sendable {
     var app: String?
     var session: String?
     var port: Int?
+    /// SHA-256 of the certificate on the phone's Wi-Fi listener, lowercase hex; sent on USB only.
+    var cert: String?
 
     /// `Google Pixel 8 · session 4f2c`
     var summary: String {
@@ -337,11 +494,18 @@ nonisolated enum PhoneLine: Equatable, Sendable {
     case pong(Int64)
     case event(TelemetryEvent)
     case body(BodyLink)
+    /// The Wi-Fi listener's answer to Relay's key; it only ever sends refusals.
+    case auth(ok: Bool, reason: String?)
     case otherLink(String)
 
     private struct Probe: Decodable {
         var link: String?
         var ping: Int64?
+    }
+
+    private struct Auth: Decodable {
+        var ok: Bool
+        var reason: String?
     }
 
     /// nil for anything that is neither a link line nor a telemetry event.
@@ -352,6 +516,7 @@ nonisolated enum PhoneLine: Equatable, Sendable {
         case "hello": return (try? decoder.decode(PhoneHello.self, from: line)).map(PhoneLine.hello)
         case "pong": return probe.ping.map(PhoneLine.pong)
         case "body": return (try? decoder.decode(BodyLink.self, from: line)).map(PhoneLine.body)
+        case "auth": return (try? decoder.decode(Auth.self, from: line)).map { .auth(ok: $0.ok, reason: $0.reason) }
         case let link?: return .otherLink(link)
         case nil: return (try? decoder.decode(TelemetryEvent.self, from: line)).map(PhoneLine.event)
         }

@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
-    <!-- The Pico pairing is a Wi-Fi password for one robot; it stays on this phone. -->
+    <!-- The Pico pairing (a Wi-Fi password) and Robot Relay's key are for one robot; they stay on this phone. -->
     <cloud-backup>
         <exclude domain="sharedpref" path="pico_link.xml" />
+        <exclude domain="sharedpref" path="relay_link.xml" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="sharedpref" path="pico_link.xml" />
+        <exclude domain="sharedpref" path="relay_link.xml" />
     </device-transfer>
 </data-extraction-rules>

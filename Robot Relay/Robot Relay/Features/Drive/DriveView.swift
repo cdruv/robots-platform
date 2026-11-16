@@ -31,7 +31,7 @@ struct DriveView: View {
 
     private static func subtitle(_ link: BodyLink?) -> String {
         guard let link else { return "phone not connected" }
-        guard let pico = link.pico else { return "phone → Pico: \(link.phase)" }
+        guard let pico = link.pico else { return "phone connected · \(BodyLinkCard.phaseLabel(link.phase))" }
         return (["Pico \(pico.board)", "legs \(pico.mode.rawValue)"] + (link.rttMs.map { ["\($0) ms"] } ?? [])).joined(separator: " · ")
     }
 
@@ -55,7 +55,7 @@ private struct BodyLinkCard: View {
                     .font(.nocturne(14, .medium))
                     .foregroundStyle(Nocturne.text)
                 Spacer(minLength: 0)
-                Text(link?.phase ?? "no phone")
+                Text(link.map { $0.pico != nil ? $0.phase : Self.phaseLabel($0.phase) } ?? "no phone")
                     .font(.nocturneMono(11))
                     .foregroundStyle(link?.pico != nil ? Nocturne.accent300 : Nocturne.neutral600)
             }
@@ -86,6 +86,16 @@ private struct BodyLinkCard: View {
         .foregroundStyle(Nocturne.neutral500)
     }
 
+    /// What the phone is waiting for, while it has no link to the Pico.
+    static func phaseLabel(_ phase: String) -> String {
+        switch phase {
+        case "unpaired": "Pico Wi‑Fi unknown"
+        case "declined": "Wi‑Fi not approved"
+        case "searching": "Pico not found"
+        default: "connecting to the Pico"
+        }
+    }
+
     static func degrees(_ value: Double?) -> String {
         value.map { $0 == 0 ? "0°" : Fmt.signed($0, decimals: 0) + "°" } ?? "—"
     }
@@ -98,13 +108,13 @@ private struct BodyLinkCard: View {
     private static func hint(_ phase: String?) -> String {
         switch phase {
         case nil:
-            "Connect the phone over USB and open Walky on it. Relay reaches the Pico through the phone."
+            "Open Walky on the phone and connect it over USB, or over Wi‑Fi once it has been paired over USB. Relay reaches the Pico through the phone."
         case "unpaired":
-            "The phone does not know the Pico’s Wi-Fi yet. Plug the Pico into this Mac once so Relay can read it; the phone gets it the next time it connects."
+            "The phone does not know the Pico’s Wi-Fi yet. Plug the Pico into this Mac once so Relay can read it; the phone gets it the next time it connects over USB."
         case "declined":
-            "The phone’s request to join the Pico’s Wi-Fi was not approved. Reconnect the phone here to ask again, then approve it on the phone."
+            "The phone’s request to join the Pico’s Wi-Fi was not approved. Reconnect the phone here over USB to ask again, then approve it on the phone."
         case "searching":
-            "The phone is looking for the Pico’s Wi-Fi. Power the robot from its battery with the Pico’s USB unplugged: plugging the Pico into the Mac stops its link until the next power-on."
+            "The phone can’t find the Pico’s Wi-Fi: the Pico is off or out of range. Power the robot from its battery with the Pico’s USB unplugged; plugging the Pico into the Mac stops its link until the next power-on."
         default:
             "The phone has joined the Pico’s Wi-Fi and is connecting."
         }
@@ -117,8 +127,10 @@ private struct LegsCard: View {
     var body: some View {
         @Bindable var store = store
         let driving = store.mode == .drive
+        let reachable = store.canEngage
         Card {
-            CardHeader(title: "Legs", note: "° from horizontal · ±90", status: driving ? "driving" : "off", isStatusHighlighted: driving)
+            CardHeader(title: "Legs", note: "° from horizontal · ±90",
+                       status: driving ? "driving" : reachable ? "off" : "needs the body link", isStatusHighlighted: driving)
             ForEach(LegSide.allCases, id: \.self) { side in
                 HStack(spacing: 10) {
                     Text(side.label + " · " + side.pin)
@@ -127,13 +139,14 @@ private struct LegsCard: View {
                         value: Binding(get: { store.targets[side] }, set: { store.setTarget(side, $0.rounded()) }),
                         in: BodyStore.range
                     )
-                    Text(BodyLinkCard.degrees(store.targets[side]))
+                    Text(reachable ? BodyLinkCard.degrees(store.targets[side]) : "—")
                         .font(.nocturneMono(11.5))
                         .foregroundStyle(Nocturne.neutral200)
                         .frame(width: 44, alignment: .trailing)
                 }
             }
             .disabled(!driving)
+            .opacity(driving ? 1 : 0.45)
             HStack(spacing: 10) {
                 if driving {
                     Button("Centre") { store.centre() }
@@ -145,6 +158,7 @@ private struct LegsCard: View {
                 }
                 Toggle("Move together", isOn: $store.movesTogether)
                     .toggleStyle(.checkbox)
+                    .disabled(!reachable)
                 Spacer(minLength: 0)
                 StopButton(store: store)
             }
@@ -152,7 +166,9 @@ private struct LegsCard: View {
                  ? "Keys: ← → or A D move both legs. Tap for 1°, hold to keep moving."
                  : "Keys: A D move the left leg, ← → the right. Tap for 1°, hold to keep moving.")
                 .foregroundStyle(driving ? Nocturne.neutral300 : Nocturne.neutral600)
-            Text("Engaging swings both legs to horizontal at full servo speed. Keep the legs clear.")
+            Text(reachable
+                 ? "Engaging swings both legs to horizontal at full servo speed. Keep the legs clear."
+                 : "Engage needs the phone’s link to the Pico; see Body link.")
                 .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -203,7 +219,8 @@ private struct DriveKeys: ViewModifier {
     }
 }
 
-/// Always sends limp, even when Relay believes the legs are off.
+/// Always sends limp, even when Relay believes the legs are off. Disabled only while the phone
+/// has no link to the Pico: then nothing can carry it, and the Pico's own timeout has the legs limp.
 private struct StopButton: View {
     let store: BodyStore
 
@@ -211,7 +228,7 @@ private struct StopButton: View {
         Button("STOP") { store.stop() }
             .buttonStyle(NocturneButtonStyle(kind: .primary, fontSize: 13))
             .keyboardShortcut(.cancelAction)
-            .disabled(store.link == nil)
+            .disabled(store.pico == nil)
     }
 }
 
@@ -309,6 +326,18 @@ private extension Array {
 #Preview {
     let app = AppModel(services: .placeholder())
     let _ = app.start()
+    DriveView()
+        .environment(app)
+        .frame(width: 1100, height: 640)
+        .foregroundStyle(Nocturne.text)
+        .background(Nocturne.bg)
+        .tint(Nocturne.accent)
+        .preferredColorScheme(.dark)
+}
+
+#Preview("Pico not reached") {
+    let app = AppModel(services: .placeholder())
+    let _ = app.body.apply(BodyLink(phase: "searching", pico: nil, rttMs: nil))
     DriveView()
         .environment(app)
         .frame(width: 1100, height: 640)

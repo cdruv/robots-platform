@@ -43,7 +43,7 @@ private val OverlayFade = tween<Float>(240)
 /** Runtime permissions and what each one enables. */
 private val PERMISSIONS = mapOf(
     Manifest.permission.RECORD_AUDIO to "hearing",
-    Manifest.permission.ACCESS_LOCAL_NETWORK to "the Pico link",
+    Manifest.permission.ACCESS_LOCAL_NETWORK to "the Pico link and Relay over Wi-Fi",
 )
 
 /**

@@ -48,6 +48,8 @@ class PicoWifi(context: Context, private val logger: () -> Logger) {
     private var foreground = false
     private var active: ConnectivityManager.NetworkCallback? = null
     private var backoffMs = MIN_BACKOFF_MS
+    /** The current search was reported as not finding the Pico; cleared on joining. */
+    private var reportedMissing = false
     private val retry = Runnable { request() }
     private val releaseIfBackground = Runnable { if (!foreground) release() }
 
@@ -77,7 +79,14 @@ class PicoWifi(context: Context, private val logger: () -> Logger) {
     fun resume() {
         foreground = true
         main.removeCallbacks(releaseIfBackground)
-        if (active == null && current.value != Status.Declined) request()
+        if (active == null && current.value != Status.Declined) {
+            when (val pairing = pairing) {
+                null -> logger().warn("No Pico network paired; connect Robot Relay over USB to pair")
+                else -> logger().info("Looking for Pico network ${pairing.ssid}")
+            }
+            reportedMissing = false
+            request()
+        }
     }
 
     fun pause() {
@@ -127,6 +136,7 @@ class PicoWifi(context: Context, private val logger: () -> Logger) {
                 if (active !== this) return
                 val gateway = gateway(properties) ?: return
                 if (route.value == null) logger().info("Joined Pico network ${pairing.ssid}, gateway ${gateway.hostAddress}")
+                reportedMissing = false
                 route.value = Route(network, gateway)
                 current.value = Status.Joined
             }
@@ -158,6 +168,10 @@ class PicoWifi(context: Context, private val logger: () -> Logger) {
             return
         }
         current.value = Status.Searching
+        if (!joined && !reportedMissing) {
+            reportedMissing = true
+            logger().info("Pico network ${pairing.ssid} not found; still looking. Is the Pico powered and in body mode?")
+        }
         if (foreground) {
             main.postDelayed(retry, backoffMs)
             backoffMs = (backoffMs * 2).coerceAtMost(MAX_BACKOFF_MS)

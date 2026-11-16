@@ -36,25 +36,34 @@ struct ConnectionPopover: View {
 
     private func phoneRow(_ phone: PhoneLink) -> some View {
         let isIdle = phone.state == .disconnected
+        let route = ConnectionStore.routeName(phone.route)
         return LinkRow(
             name: "Phone app",
             tone: phone.isConnected ? .on : isIdle ? .off : .idle,
-            meta: "\(phone.deviceName) · USB"
+            meta: route.map { "\(phone.deviceName) · \($0)" } ?? phone.deviceName
         ) {
             switch phone.state {
             case .connected:
                 let rtt = phone.rttMs.map { "\($0) ms" } ?? "—"
                 Text("RTT \(rtt)\n\(phone.eventsPerSecond) ev/s · \(phone.dropped) dropped")
             case .connecting:
-                Text("Connecting over USB…")
+                Text(route.map { "Connecting over \($0)…" } ?? "Looking for the phone…")
             case .retrying(let date):
                 TimelineView(.periodic(from: .now, by: 1)) { _ in
                     Text("Retrying in \(ConnectionStore.secondsUntil(date)) s")
                 }
+            case .waiting:
+                Text(phone.isPairedForWifi
+                     ? "No phone on USB · waiting for Walky on Wi‑Fi"
+                     : "No phone on USB · connect over USB once to pair")
             case .disconnected:
                 Text("Not connected")
             }
         } action: {
+            if phone.state == .waiting {
+                Button("Retry") { app.connection.retryPhone() }
+                    .buttonStyle(.nocturneSecondary)
+            }
             Button(isIdle ? "Connect" : "Disconnect") { app.connection.togglePhone() }
                 .buttonStyle(isIdle ? .nocturneSecondary : .nocturneGhost)
         }

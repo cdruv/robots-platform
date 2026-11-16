@@ -228,7 +228,10 @@ fun DebugOverlay(runtime: Runtime, window: Window, modifier: Modifier = Modifier
                         server.error != null -> append("bind failed: ${server.error}")
                         server.port == null -> append("not started")
                         else -> {
-                            append("port ${server.port}  clients ${server.clients}")
+                            append("port ${server.port}")
+                            server.wifiPort?.let { append("  wifi $it") }
+                            server.wifiError?.let { append("  wifi failed: $it") }
+                            append("  clients ${server.clients}")
                             if (server.addresses.isNotEmpty()) append("  ${server.addresses.joinToString(" ")}")
                         }
                     }

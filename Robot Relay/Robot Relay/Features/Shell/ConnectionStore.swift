@@ -11,7 +11,7 @@ final class ConnectionStore {
         self.service = service
     }
 
-    /// Follows the links and connects to the USB phone.
+    /// Follows the links and connects to the phone, over USB or Wi‑Fi.
     func start() {
         guard task == nil else { return }
         task = Task { [weak self, service] in
@@ -34,9 +34,11 @@ final class ConnectionStore {
         case .connected:
             return Summary(tone: .on, label: "Connected", detail: links.phone.rttMs.map { "\($0) ms" } ?? "— ms")
         case .connecting:
-            return Summary(tone: .idle, label: "Connecting", detail: "phone over USB")
+            return Summary(tone: .idle, label: "Connecting", detail: Self.routeName(links.phone.route).map { "phone over \($0)" } ?? "looking for phone")
         case .retrying(let date):
             return Summary(tone: .idle, label: "Retrying", detail: "retry \(Self.secondsUntil(date))s")
+        case .waiting:
+            return Summary(tone: .idle, label: "Waiting", detail: links.phone.isPairedForWifi ? "phone on Wi‑Fi" : "pair over USB")
         case .disconnected:
             break
         }
@@ -44,6 +46,14 @@ final class ConnectionStore {
             return Summary(tone: .idle, label: "Pico over USB", detail: "phone offline")
         }
         return Summary(tone: .off, label: "Offline", detail: "no links")
+    }
+
+    static func routeName(_ route: PhoneLink.Route?) -> String? {
+        switch route {
+        case .usb: "USB"
+        case .wifi: "Wi‑Fi"
+        case nil: nil
+        }
     }
 
     /// Whole seconds until `date`, at least 1.
@@ -57,6 +67,11 @@ final class ConnectionStore {
             Task { await service.disconnectPhone() }
             return
         }
+        Task { await service.connectPhone() }
+    }
+
+    /// Tries now: USB first, then Wi‑Fi.
+    func retryPhone() {
         Task { await service.connectPhone() }
     }
 

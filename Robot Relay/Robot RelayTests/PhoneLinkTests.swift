@@ -18,6 +18,21 @@ struct PhoneLineTests {
         #expect(hello.session == "4f2c9a1e")
         #expect(hello.port == 7777)
         #expect(hello.summary == "Google Pixel 8 · session 4f2c")
+        #expect(hello.cert == nil)
+    }
+
+    @Test func helloOverUSBCarriesTheCertificate() {
+        let line = #"{"link":"hello","protocol":3,"session":"a","port":7777,"cert":"75a342"}"#
+        guard case .hello(let hello) = decode(line) else {
+            Issue.record("not a hello")
+            return
+        }
+        #expect(hello.cert == "75a342")
+    }
+
+    @Test func authRefusal() {
+        #expect(decode(#"{"link":"auth","ok":false,"reason":"unpaired"}"#) == .auth(ok: false, reason: "unpaired"))
+        #expect(decode(#"{"link":"auth"}"#) == nil)
     }
 
     @Test func pongLine() {
@@ -102,6 +117,27 @@ struct SeqDedupeTests {
         let admitted = dedupe.admit(1)
         #expect(restarted)
         #expect(admitted)
+    }
+}
+
+struct HelloLinesTests {
+    private let pairing = PicoPairing(ssid: "walky-pico", password: "secret")
+    private let key = Data(repeating: 7, count: 32)
+
+    private func json(_ line: Data) -> [String: String]? {
+        try? JSONDecoder().decode([String: String].self, from: line)
+    }
+
+    @Test func usbCarriesThePicoPairingAndTheKey() {
+        let lines = PhoneLinkService.helloLines(route: .usb, pairing: pairing, key: key).compactMap(json)
+        #expect(lines.count == 2)
+        #expect(lines.first?["link"] == "pair")
+        #expect(lines.first?["password"] == "secret")
+        #expect(lines.last == ["link": "key", "key": key.base64EncodedString()])
+    }
+
+    @Test func wifiCarriesNoSecrets() {
+        #expect(PhoneLinkService.helloLines(route: .wifi, pairing: pairing, key: key).isEmpty)
     }
 }
 
